@@ -1,4 +1,4 @@
-# EC 504 Project
+# CS 523 Project
 ## Transformer
 
 ## References
