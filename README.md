@@ -1,5 +1,5 @@
 # CS 523 Project
-This is a reimplementatopm pf transformer architecture for machine translation based on the original paper, Attention is all you need [1].
+This is a re-implementation of transformer architecture for machine translation based on the original paper, Attention is all you need [1].
 
 ## Dataset
 We plan to use datasets identical to that used in the original paper. The datasets are:
