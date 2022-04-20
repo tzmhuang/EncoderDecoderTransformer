@@ -27,15 +27,7 @@ sys.path.append('subword-nmt')
 from learn_bpe import learn_bpe
 from apply_bpe import BPE
 
-TASK = ['de-en', 'fr-en', 'zh-en']
-LANG = ['en', 'de', 'fr']
-LANG_MODEL = {'en': 'en_core_web_sm',
-              'de': 'de_core_news_sm', 'fr': 'fr_core_news_sm'}
-
-
-special_symbols = ['<unk>', '<pad>', '<bos>', '<eos>']
-UNK_IDX, PAD_IDX, BOS_IDX, EOS_IDX = 0, 1, 2, 3
-
+from helper import *
 
 class TqdmUpTo(tqdm):
     def update_to(self, b=1, bsize=1, tsize=None):
@@ -342,6 +334,9 @@ def main():
             train_file[src]), tokenizers[src], min_freq=MIN_FREQ, specials=special_symbols)
         trg_vocab = _build_vocab(_text_iter(
             train_file[trg]), tokenizers[trg], min_freq=MIN_FREQ, specials=special_symbols)
+
+    src_vocab.set_default_index(UNK_IDX)
+    trg_vocab.set_default_index(UNK_IDX)
 
     print("Finished vocab generation")
     print("Source vocab size: ", len(src_vocab),
