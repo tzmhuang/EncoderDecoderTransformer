@@ -30,7 +30,7 @@ def get_padding_mask(X, pad_token):
 class ScaledDPAttention(nn.Module):
     def __init__(self, dim_scale):
         super().__init__()
-        self.scale = math.sqrt(self.dim_scale)
+        self.scale = math.sqrt(dim_scale)
         self.sm = nn.Softmax(dim=-1)
     
     def forward(self, q, k, v, mask):
@@ -171,7 +171,7 @@ class Generator(nn.Module):
     def forward(self, X, logit=True):
         return self.linear(X)
 
-class Transformer(nn.Module):
+class TransformerModel(nn.Module):
     def __init__(self, dim_model, dim_hidden, dim_vocab, N=6, h=8):
         super().__init__()
 
