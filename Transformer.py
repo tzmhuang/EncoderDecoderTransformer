@@ -10,17 +10,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel
-import torch.backends.cudnn as cudnn
 import torch.optim as optim
-import torch.utils.data
 from torch.utils import data
-import torchvision.datasets as dset
-import torchvision.transforms as transforms
-import torchvision.utils as vutils
-from torchvision import transforms as T
-from torchvision.datasets import ImageFolder
 from torch.autograd import Variable
-from torchvision.utils import save_image
 from torch.backends import cudnn
 
 # TODO: Add trg_mask, src_padding mask, trg_padding_mask as forward arg
