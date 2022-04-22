@@ -45,7 +45,7 @@ class ScaledDPAttention(nn.Module):
         return output
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, dim_model, h): # dim_key, dim_val = dim_model/h (?)
+    def __init__(self, dim_model, h, dropout=0.1): # dim_key, dim_val = dim_model/h (?)
         super().__init__()
         self.h = h
         self.dim_model = dim_model
@@ -61,6 +61,7 @@ class MultiHeadAttention(nn.Module):
             self.v_layers.append(nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False))
             self.attention_layers.append(ScaledDPAttention(self.dim_head))
         self.linear = nn.Linear(in_features = h*self.dim_head, out_features=dim_model, bias=False)
+        self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, Q, K, V, mask):
         outs = []
@@ -70,13 +71,14 @@ class MultiHeadAttention(nn.Module):
             v = self.v_layers[i](V)
             o = self.attention_layers[i](q, k, v, mask)
             outs.append(o)
-        output = torch.cat(outs, dim=-1) # check dimenson 
-        return self.linear(output)
+        output = torch.cat(outs, dim=-1) # check dimenson
+        return self.dropout(self.linear(output))
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim_model, max_len=1000):
+    def __init__(self, dim_model, dropout=0.1, max_len=1000):
         super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
         get_pos = lambda pos : [pos/(10000**(2*(i//2)/dim_model)) for i in range(dim_model)]
         code = np.array([get_pos(i) for i in range(max_len)])
         encoding = np.zeros((max_len, dim_model))
@@ -87,7 +89,7 @@ class PositionalEncoding(nn.Module):
     
     def forward(self, X):
         X = X + self.encoding[:,:X.size(1)]
-        return X
+        return self.dropout(X)
 
 class TokenEmbedding(nn.Module):
     def __init__(self, dim_vocab, dim_emb):
@@ -100,27 +102,29 @@ class TokenEmbedding(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, dim_model, dim_hidden, h=8):
+    def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()        
-        self.attention = MultiHeadAttention(dim_model, h)
+        self.attention = MultiHeadAttention(dim_model, h, dropout)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
             nn.ReLU(),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
         self.norm = nn.LayerNorm(dim_model)
+        self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, X, padding_mask):
         A = self.attention(Q = X, K = X, V = X, mask=padding_mask)
         A = self.norm(A + X)
         F = self.FFN(A)
+        F = self.dropout(F)
         return self.norm(F + A)
     
 
 class Encoder(nn.Module):
-    def __init__(self, N, dim_model, dim_hidden, h=8):
+    def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()
-        encoder_layer = EncoderLayer(dim_model, dim_hidden, h)
+        encoder_layer = EncoderLayer(dim_model, dim_hidden, h, dropout)
         self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(N)])
 
     def forward(self, X, padding_mask):
@@ -130,16 +134,17 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, dim_model, dim_hidden, h=8):
+    def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()
-        self.masked_attention = MultiHeadAttention(dim_model, h)
-        self.attention = MultiHeadAttention(dim_model, h)
+        self.masked_attention = MultiHeadAttention(dim_model, h, dropout)
+        self.attention = MultiHeadAttention(dim_model, h, dropout)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
             nn.ReLU(),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
         self.norm = nn.LayerNorm(dim_model)
+        self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, X, encoder_feature, src_mask, trg_mask): # (X, encoder_feature)
         masked_A = self.masked_attention(Q = X, K = X, V = X, mask = trg_mask)
@@ -147,12 +152,13 @@ class DecoderLayer(nn.Module):
         A = self.attention(Q = masked_A, K = encoder_feature, V = encoder_feature, mask = src_mask)
         A = self.norm(A + masked_A)
         F = self.FFN(A)
+        F = self.dropout(F)
         return self.norm(F + A)
 
 class Decoder(nn.Module):
-    def __init__(self, N, dim_model, dim_hidden, h=8):
+    def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()
-        decoder_layer = DecoderLayer(dim_model, dim_hidden)
+        decoder_layer = DecoderLayer(dim_model, dim_hidden, dropout)
         self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for _ in range(N)])
     
     def forward(self, X, E, src_padding_mask, trg_padding_mask, peek_mask):
@@ -172,22 +178,23 @@ class Generator(nn.Module):
         return self.linear(X)
 
 class TransformerModel(nn.Module):
-    def __init__(self, dim_model, dim_hidden, dim_vocab, N=6, h=8):
+    def __init__(self, dim_model, dim_hidden, dim_vocab, N=6, h=8, dropout=0.1):
         super().__init__()
 
-        self.encoder = Encoder(N, dim_model, dim_hidden, h)
-        self.decoder = Decoder(N, dim_model, dim_hidden, h)
+        self.encoder = Encoder(N, dim_model, dim_hidden, h, dropout)
+        self.decoder = Decoder(N, dim_model, dim_hidden, h, dropout)
         self.src_embedding = TokenEmbedding(dim_vocab, dim_model)
         self.trg_embedding = TokenEmbedding(dim_vocab, dim_model)
         self.generator = Generator(dim_model, dim_vocab)
-        self.positional_encoding = PositionalEncoding(dim_model)
+        self.enc_positional_encoding = PositionalEncoding(dim_model, dropout)
+        self.dec_positional_encoding = PositionalEncoding(dim_model, dropout)
     
     def encode(self, X, padding_mask):
-        src_emb = self.positional_encoding(self.src_embedding(X))
+        src_emb = self.enc_positional_encoding(self.src_embedding(X))
         return self.encoder(src_emb, padding_mask)
 
     def decode(self, X, E, src_padding_mask, trg_padding_mask, peek_mask):
-        trg_emb = self.positional_encoding(self.trg_embedding(X))
+        trg_emb = self.dec_positional_encoding(self.trg_embedding(X))
         return self.decoder(trg_emb, E, src_padding_mask, trg_padding_mask, peek_mask)
         
     def forward(self, src, trg, src_padding_mask, trg_padding_mask, peek_mask):
