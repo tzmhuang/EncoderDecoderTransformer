@@ -50,16 +50,15 @@ class MultiHeadAttention(nn.Module):
         self.h = h
         self.dim_model = dim_model
         self.dim_head = dim_model // h
-        
-        self.v_layers = []
-        self.k_layers = []
-        self.q_layers = []
-        self.attention_layers = []
-        for i in range(self.h):
-            self.q_layers.append(nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False))
-            self.k_layers.append(nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False))
-            self.v_layers.append(nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False))
-            self.attention_layers.append(ScaledDPAttention(self.dim_head))
+    
+        linear_layer = nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False)
+        attention_layer = ScaledDPAttention(self.dim_head)
+
+        self.v_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
+        self.k_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
+        self.q_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
+        self.attention_layers = nn.ModuleList([copy.deepcopy(attention_layer) for _ in range(self.h)])
+
         self.linear = nn.Linear(in_features = h*self.dim_head, out_features=dim_model, bias=False)
         self.dropout = nn.Dropout(p=dropout)
     
