@@ -158,7 +158,7 @@ class DecoderLayer(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()
-        decoder_layer = DecoderLayer(dim_model, dim_hidden, dropout)
+        decoder_layer = DecoderLayer(dim_model, dim_hidden, h, dropout)
         self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for _ in range(N)])
     
     def forward(self, X, E, src_padding_mask, trg_padding_mask, peek_mask):
@@ -186,8 +186,8 @@ class TransformerModel(nn.Module):
         self.src_embedding = TokenEmbedding(dim_vocab, dim_model)
         self.trg_embedding = TokenEmbedding(dim_vocab, dim_model)
         self.generator = Generator(dim_model, dim_vocab)
-        self.enc_positional_encoding = PositionalEncoding(dim_model, dropout)
-        self.dec_positional_encoding = PositionalEncoding(dim_model, dropout)
+        self.enc_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
+        self.dec_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
     
     def encode(self, X, padding_mask):
         src_emb = self.enc_positional_encoding(self.src_embedding(X))
