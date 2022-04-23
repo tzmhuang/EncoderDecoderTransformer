@@ -241,6 +241,7 @@ def main():
     parser.add_argument('--train_prefix', type=str, default='train')
     parser.add_argument('--test_prefix', type=str, default='test')
     parser.add_argument('--valid_prefix', type=str, default='valid')
+    parser.add_argument('--bpe_min_freq', type=int, default=1)
     parser.add_argument('--min_freq', type=int, default=1)
     parser.add_argument('--save_dir', type=str, required=True)
     parser.add_argument('--share_vocab', action='store_true')
@@ -286,7 +287,7 @@ def main():
     tokenizers = {}
     if args.use_bpe:
         args.bpe_codes = os.path.join(args.data_dir, args.bpe_codes)
-        create_bpe_codes([train_src, train_trg], args.bpe_codes, args.code_size, args.min_freq, True)
+        create_bpe_codes([train_src, train_trg], args.bpe_codes, args.code_size, args.bpe_min_freq, True)
         print("BPE code generation finished")
         print("Building BPE tokenizer")
         with codecs.open(args.bpe_codes, encoding='utf-8') as codes:
