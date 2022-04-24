@@ -230,9 +230,7 @@ def mkdir_if_needed(dir_name):
 
 
 def main():
-    # Run By:
-    #
-    # python preprocess_data.py --src_lang en --trg_lang de --data_dir ./wmt17_en_de --save_dir ./wmt17_en_de_processed.pkl --share_vocab
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--src_lang', required=True, choices=LANG)
     parser.add_argument('--trg_lang', required=True, choices=LANG)

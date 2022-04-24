@@ -15,7 +15,7 @@ from torch.utils import data
 from torch.autograd import Variable
 from torch.backends import cudnn
 
-# TODO: Add trg_mask, src_padding mask, trg_padding_mask as forward arg
+from helper import *
 
 
 def get_peek_mask(X):
@@ -93,7 +93,7 @@ class PositionalEncoding(nn.Module):
 class TokenEmbedding(nn.Module):
     def __init__(self, dim_vocab, dim_emb):
         super().__init__()
-        self.embedding = nn.Embedding(dim_vocab, dim_emb)
+        self.embedding = nn.Embedding(dim_vocab, dim_emb, padding_idx = PAD_IDX)
         self.dim_emb = dim_emb
     
     def forward(self, tokens):
@@ -170,14 +170,14 @@ class Decoder(nn.Module):
 class Generator(nn.Module):
     def __init__(self, dim_model, dim_output):
         super().__init__()
-        self.linear = nn.Linear(in_features=dim_model, out_features = dim_output)
+        self.linear = nn.Linear(in_features=dim_model, out_features = dim_output, bias=False)
         # self.softmax = nn.Softmax(dim=-1)
     
     def forward(self, X, logit=True):
         return self.linear(X)
 
 class TransformerModel(nn.Module):
-    def __init__(self, dim_model, dim_hidden, dim_vocab, N=6, h=8, dropout=0.1):
+    def __init__(self, dim_model, dim_hidden, dim_vocab, N=6, h=8, dropout=0.1, weight_sharing=True):
         super().__init__()
 
         self.encoder = Encoder(N, dim_model, dim_hidden, h, dropout)
@@ -187,6 +187,10 @@ class TransformerModel(nn.Module):
         self.generator = Generator(dim_model, dim_vocab)
         self.enc_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
         self.dec_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
+
+        if weight_sharing:
+            self.generator.linear.weight = self.trg_embedding.embedding.weight
+            self.src_embedding.embedding.weight = self.trg_embedding.embedding.weight
     
     def encode(self, X, padding_mask):
         src_emb = self.enc_positional_encoding(self.src_embedding(X))

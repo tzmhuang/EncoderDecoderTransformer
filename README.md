@@ -28,6 +28,12 @@ The generate data file has the following structure:
     -- test: test pair
 ```
 
+## Training
+
+```
+python train.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 16 --log_dir ./log
+```
+
 ## Dataset
 We plan to use and updated version of the datasets used in the original paper. The datasets are:
 
