@@ -6,12 +6,12 @@ This is a re-implementation of transformer architecture for machine translation 
 
 ### Download and preprocess data
 
-To download and preprocess for WMT17 for English-German without byte-pair encoding, 
+To download and preprocess for WMT17 for English-German translation without byte-pair encoding, 
 ```
 python preprocess_data.py --src_lang en --trg_lang de --data_dir ./wmt17_en_de --save_dir ./wmt17_en_de_processed.pkl --share_vocab --min_freq 2
 ```
 
-To download and preprocess for WMT17 for English-German with byte-pair encoding,
+To download and preprocess for WMT17 for English-German translation with byte-pair encoding,
 ```
 python preprocess_data.py --src_lang en --trg_lang de --data_dir ./wmt17_en_de --save_dir ./wmt17_en_de_processed_bpe.pkl --share_vocab --min_freq 2 --use_bpe
 ```
