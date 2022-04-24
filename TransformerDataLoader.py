@@ -10,12 +10,13 @@ from helper import *
 class TransformerDataset(Dataset):
     def __init__(self, data_dir, split='train'):
         self.data_dir = data_dir
-        self.dataset = self.load_data()
-        self.src = self.dataset['setting'].src_lang
-        self.trg = self.dataset['setting'].trg_lang
-        self.vocab = self.dataset['vocab']
-        self.data = self.dataset[split]
+        dataset = self.load_data()
+        self.src = dataset['setting'].src_lang
+        self.trg = dataset['setting'].trg_lang
+        self.vocab = dataset['vocab']
+        self.data = dataset[split]
         self.src_tokenizer, self.trg_tokenizer = self.get_tokenizer()
+        del dataset
 
     def get_tokenizer(self):
         src_tok = get_tokenizer('spacy', language=LANG_MODEL[self.src])
