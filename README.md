@@ -28,7 +28,7 @@ The generate data file has the following structure:
     -- test: test pair
 ```
 
-## Training
+### Training
 
 ```
 python train.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 16 --log_dir ./log
