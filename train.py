@@ -59,16 +59,16 @@ def epoch_time(start_time, end_time):
     return elapsed_mins, elapsed_secs
 
 
-def load_model(resume_iters):
-    # [TODO] pass in variables
-    print('Loading the trained models from step {}...'.format(resume_iters))
-    model_path = os.path.join('model/transformer_{}.pt'.format(resume_iters+1))
+# def load_model(resume_iters):
+#     # [TODO] pass in variables
+#     print('Loading the trained models from step {}...'.format(resume_iters))
+#     model_path = os.path.join('model/transformer_{}.pt'.format(resume_iters+1))
 
-    model = Transformer.TransformerModel(
-        dim_model, dim_hidden, dim_vocab, N=num_layers, h=num_heads)
-    model.load_state_dict(torch.load(model_path))
+#     model = Transformer.TransformerModel(
+#         dim_model, dim_hidden, dim_vocab, N=num_layers, h=num_heads)
+#     model.load_state_dict(torch.load(model_path))
 
-    return model
+#     return model
 
 
 def translate_sentence(sentence, src_field, trg_field, model, max_len=2000, logging=True):
@@ -124,7 +124,7 @@ def show_bleu(data, src_field, trg_field, model, device, max_len=50):
     trgs = []
     pred_trgs = []
     desc = '    - calculating BLEU - '
-    for d in tqdm(data[:100], mininterval=2, desc=desc, leave=False):  # debug
+    for d in tqdm(data, mininterval=2, desc=desc, leave=False):
         src, trg = d  # strings not tensor
         pred_trg = translate_sentence(
             src, src_field, trg_field, model, max_len, logging=False)
@@ -144,10 +144,10 @@ def show_bleu(data, src_field, trg_field, model, device, max_len=50):
     individual_bleu4_score = bleu_score(
         pred_trgs, trgs, max_n=4, weights=[0, 0, 0, 1])
 
-    print(f'BLEU Score = {bleu*100:.2f}'
+    logging.info(f'BLEU Score = {bleu*100:.2f}'
           + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
           + f'| BLEU-3 = {individual_bleu3_score*100:.2f} | BLEU-4 = {individual_bleu4_score*100:.2f}')
-    return bleu
+    return bleu, individual_bleu1_score, individual_bleu2_score, individual_bleu3_score, individual_bleu4_score
 
 
 def cal_loss(pred, gold, trg_pad_idx, smoothing=True):
@@ -156,6 +156,7 @@ def cal_loss(pred, gold, trg_pad_idx, smoothing=True):
     if smoothing:
         eps = 0.1
         n_class = pred.size(-1)
+        # gold = gold.type(torch.LongTensor).to(device)
         one_hot = torch.zeros_like(pred).scatter(1, gold.view(-1, 1), 1)
         one_hot = one_hot * (1 - eps) + (1 - one_hot) * eps / (n_class - 1)
         log_prb = F.log_softmax(pred, dim=1)
@@ -169,7 +170,7 @@ def cal_loss(pred, gold, trg_pad_idx, smoothing=True):
     return loss
 
 
-def train(model, iterator, optimizer, criterion, epoch_num,clip=1, log_iter=5000):
+def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=5000):
     model.train()  # set as train model
     epoch_loss = 0
 
@@ -257,12 +258,10 @@ def evaluate(model, iterator, criterion):
             # calculate total loss
             epoch_loss += loss.item()
 
-            break  # debug
-
     return epoch_loss / len(iterator)
 
 
-def train_model(model, train_iterator, valid_iterator, test_iterator, optimizer, n_epochs, clip, args):
+def train_model(model, train_iterator, valid_iterator, optimizer, n_epochs, clip, args):
 
     # save the losses
     log = []
@@ -285,12 +284,8 @@ def train_model(model, train_iterator, valid_iterator, test_iterator, optimizer,
         end_time = time.time()  # record the end time
         epoch_mins, epoch_secs = epoch_time(start_time, end_time)
 
-        test_loss = evaluate(model, test_iterator, criterion)
-        test_ppl = math.exp(min(test_loss, 100))
-
-        logging.info(f'Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s |' \
-            + f' valid_loss: {valid_loss:.3f} valid_ppl: {valid_ppl} |' \
-            + f' test_loss: {test_loss:.3f}  test_ppl: {test_ppl}')
+        logging.info(f'Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s |'
+                     + f' valid_loss: {valid_loss:.3f} valid_ppl: {valid_ppl} |')
 
         checkpoint = {'epoch': epoch, 'model': model.state_dict()}
 
@@ -312,17 +307,36 @@ def train_model(model, train_iterator, valid_iterator, test_iterator, optimizer,
         # losses['valid_bleu_{}'.format(epoch)] = show_bleu(
         #     valid_iterator.dataset.data, src_vocab, trg_vocab, model, device)
 
-        metrics['test_loss'] = test_loss
-        metrics['test_PPL'] = test_ppl
-        # losses['test_bleu_{}'.format(epoch)] = show_bleu(
-        #     test_iterator.dataset.data, src_vocab, trg_vocab, model, device)
-
         log += [metrics]
         # [TODO]: change saving structure
         # dump into json file
         log_name = os.path.join(args.log_dir, 'train.log.json')
         with open(log_name, 'w') as f:
             json.dump(log, f)
+
+
+def eval_model(model, data_iterator, args):
+    log = []
+    criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    src_vocab = data_iterator.dataset.vocab['src']
+    trg_vocab = data_iterator.dataset.vocab['trg']
+    loss = evaluate(model, valid_iterator, criterion)
+    ppl = math.exp(min(valid_loss, 100))
+    bleu, bleu1, bleu2, bleu3, bleu4 = show_bleu(
+        valid_iterator.dataset.data, src_vocab, trg_vocab, model, device)
+    metric = {}
+    metric['loss'] = loss
+    metric['ppl'] = ppl
+    metric['bleu'] = bleu
+    metric['bleu1'] = bleu1
+    metric['bleu2'] = bleu2
+    metric['bleu3'] = bleu3
+    metric['bleu4'] = bleu4
+    log += [metrics]
+    log_name = os.path.join(args.log_dir, 'evaluate.log.json')
+    with open(log_name, 'w') as f:
+        json.dump(log, f)
+    return
 
 
 def main():
@@ -332,6 +346,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--eval_only", action='store_true')
+    parser.add_argument("--ckpt_path", type=str)
     args = parser.parse_args()
 
     if not os.path.exists(args.log_dir):
@@ -364,24 +379,26 @@ def main():
             nn.init.xavier_uniform_(m.weight.data)
 
     if not args.eval_only:
-        logging.info("Running Train")
-        logging.info(f"Loading Data: {args.data_path}")
+        logging.info("Running train")
+        logging.info(f"Loading data: {args.data_path}")
         train_iterator = TransformerDataLoader(
             args.data_path, 'train', batch_size=args.batch_size, num_workers=args.num_workers)
         valid_iterator = TransformerDataLoader(
             args.data_path, 'valid', batch_size=args.batch_size, num_workers=args.num_workers)
         test_iterator = TransformerDataLoader(
             args.data_path, 'test', batch_size=args.batch_size, num_workers=args.num_workers)
+        logging.info(f"training dataset: {len(train_iterator.dataset.data)} \n"
+                     + f"validation dataset: {len(valid_iterator.dataset.data)} \n"
+                     + f"Test dataset: {len(test_iterator.dataset.data)} \n")
 
-        logging.info(f"training dataset: {len(train_iterator.dataset.data)} \n" \
-            + f"validation dataset: {len(valid_iterator.dataset.data)} \n" \
-            + f"testing dataset: {len(test_iterator.dataset.data)} \n")
-            
-        logging.info(f"src_vocab: {len(train_iterator.dataset.vocab['src'])} \n" \
-            + f"trg_vocab: {len(train_iterator.dataset.vocab['trg'])} \n")
+        src_vocab_dim = len(train_iterator.dataset.vocab['src'])
+        trg_vocab_dim = len(train_iterator.dataset.vocab['trg'])
+
+        logging.info(f"src_vocab: {src_vocab_dim} \n" +
+                     f"trg_vocab: {trg_vocab_dim} \n")
         logging.info(f"Running on: {device}")
         model = Transformer.TransformerModel(
-            dim_model, dim_hidden, len(train_iterator.dataset.vocab['trg']), N=num_layers, h=num_heads).to(device)
+            dim_model, dim_hidden, src_vocab_dim, trg_vocab_dim, N=num_layers, h=num_heads).to(device)
 
         logging.info(model)
         logging.info(
@@ -391,15 +408,35 @@ def main():
         optimizer = NoamOpt(dim_model, 1, warmup,
                             torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9))
         train_model(model, train_iterator, valid_iterator,
-                    test_iterator, optimizer, n_epochs, clip, args)
+                    optimizer, n_epochs, clip, args)
     else:
-        # [TODO]: eval only
-        pass
+        logging.info(f"Eval only")
+        logging.info(f"Loading data: {args.data_path}")
+        test_iterator = TransformerDataLoader(
+            args.data_path, 'test', batch_size=args.batch_size, num_workers=args.num_workers)
+        logging.info(f"Test dataset: {len(test_iterator.dataset.data)} \n")
+        src_vocab_dim = len(test_iterator.dataset.vocab['src'])
+        trg_vocab_dim = len(test_iterator.dataset.vocab['trg'])
+        logging.info(f"src_vocab: {src_vocab_dim} \n" +
+                     f"trg_vocab: {trg_vocab_dim} \n")
+        logging.info(f"Running on: {device}")
+        model = Transformer.TransformerModel(
+            dim_model, dim_hidden, src_vocab_dim, trg_vocab_dim, N=num_layers, h=num_heads)
 
-    # [TODO]: add args
-    # [TODO]: Add logging
+        if os.path.exists(args.ckpt_path):
+            logging.error(f"Ckpt not found: {args.ckpt_path}")
+            return
+        ckpt = torch.load(args.ckpt_path)
+        model.load_state_dict(ckpt['model'])
+        model.to(device)
+        logging.info(model)
+        logging.info(
+            f'Loaded model from {args.ckpt_path} with {count_parameters(model)} parameters')
+
+    # evaluate model
+    logging.info("Running eval")
+    eval_model(model, test_iterator, args)
 
 
 if __name__ == "__main__":
     main()
-
