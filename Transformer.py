@@ -87,7 +87,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('encoding', encoding)
     
     def forward(self, X):
-        X = X + self.encoding[:,:X.size(1)]
+        X = X + Variable(self.encoding[:,:X.size(1)], requires_grad=False)
         return self.dropout(X)
 
 class TokenEmbedding(nn.Module):

@@ -145,8 +145,8 @@ def show_bleu(data, src_field, trg_field, model, device, max_len=50):
         pred_trgs, trgs, max_n=4, weights=[0, 0, 0, 1])
 
     logging.info(f'BLEU Score = {bleu*100:.2f}'
-          + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
-          + f'| BLEU-3 = {individual_bleu3_score*100:.2f} | BLEU-4 = {individual_bleu4_score*100:.2f}')
+                 + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
+                 + f'| BLEU-3 = {individual_bleu3_score*100:.2f} | BLEU-4 = {individual_bleu4_score*100:.2f}')
     return bleu, individual_bleu1_score, individual_bleu2_score, individual_bleu3_score, individual_bleu4_score
 
 
@@ -343,6 +343,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, required=True)
     parser.add_argument("--log_dir", type=str, required=True)
+    parser.add_argument("--use_bpe", action='store_true',
+                        help="True if data is in BPE")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--eval_only", action='store_true')
@@ -382,11 +384,11 @@ def main():
         logging.info("Running train")
         logging.info(f"Loading data: {args.data_path}")
         train_iterator = TransformerDataLoader(
-            args.data_path, 'train', batch_size=args.batch_size, num_workers=args.num_workers)
+            args.data_path, 'train', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe)
         valid_iterator = TransformerDataLoader(
-            args.data_path, 'valid', batch_size=args.batch_size, num_workers=args.num_workers)
+            args.data_path, 'valid', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe)
         test_iterator = TransformerDataLoader(
-            args.data_path, 'test', batch_size=args.batch_size, num_workers=args.num_workers)
+            args.data_path, 'test', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe)
         logging.info(f"training dataset: {len(train_iterator.dataset.data)} \n"
                      + f"validation dataset: {len(valid_iterator.dataset.data)} \n"
                      + f"Test dataset: {len(test_iterator.dataset.data)} \n")
@@ -409,14 +411,14 @@ def main():
                             torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9))
         train_model(model, train_iterator, valid_iterator,
                     optimizer, n_epochs, clip, args)
-        
+
         logging.info("Running eval")
         eval_model(model, test_iterator, args)
     else:
         logging.info(f"Eval only")
         logging.info(f"Loading data: {args.data_path}")
         test_iterator = TransformerDataLoader(
-            args.data_path, 'test', batch_size=args.batch_size, num_workers=args.num_workers)
+            args.data_path, 'test', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe)
         logging.info(f"Test dataset: {len(test_iterator.dataset.data)} \n")
         src_vocab_dim = len(test_iterator.dataset.vocab['src'])
         trg_vocab_dim = len(test_iterator.dataset.vocab['trg'])

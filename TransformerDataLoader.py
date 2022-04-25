@@ -8,8 +8,9 @@ from helper import *
 
 
 class TransformerDataset(Dataset):
-    def __init__(self, data_dir, split='train'):
+    def __init__(self, data_dir, split='train', use_bpe=False):
         self.data_dir = data_dir
+        self.use_bpe = use_bpe
         dataset = self.load_data()
         self.src = dataset['setting'].src_lang
         self.trg = dataset['setting'].trg_lang
@@ -19,8 +20,12 @@ class TransformerDataset(Dataset):
         del dataset
 
     def get_tokenizer(self):
-        src_tok = get_tokenizer('spacy', language=LANG_MODEL[self.src])
-        trg_tok = get_tokenizer('spacy', language=LANG_MODEL[self.trg])
+        if self.use_bpe:
+            src_tok = str.split
+            trg_tok = str.split
+        else:
+            src_tok = get_tokenizer('spacy', language=LANG_MODEL[self.src])
+            trg_tok = get_tokenizer('spacy', language=LANG_MODEL[self.trg])
         return src_tok, trg_tok
 
     def load_data(self):
@@ -29,7 +34,7 @@ class TransformerDataset(Dataset):
         return
 
     def process_data(self, data):
-        trg, src = data
+        src, trg = data
         src_tok = self.src_tokenizer(src)
         trg_tok = self.trg_tokenizer(trg)
 
@@ -49,8 +54,8 @@ class TransformerDataset(Dataset):
 
 
 class TransformerDataLoader(DataLoader):
-    def __init__(self, data_dir, split, batch_size, num_workers, shuffle=True):
-        dataset = TransformerDataset(data_dir, split=split)
+    def __init__(self, data_dir, split, batch_size, num_workers, use_bpe,shuffle=True):
+        dataset = TransformerDataset(data_dir, split=split, use_bpe=use_bpe)
         super().__init__(dataset, batch_size=batch_size, shuffle=shuffle,
                          num_workers=num_workers, collate_fn=self.collate_fn)
         return
@@ -69,7 +74,7 @@ class TransformerDataLoader(DataLoader):
 
 if __name__ == "__main__":
     data_path = "./wmttest_en_de_processed_bpe.pkl"
-    test_loader = TransformerDataLoader(data_path, 'test', batch_size=5)
+    test_loader = TransformerDataLoader(data_path, 'test', batch_size=5, num_workers=1, use_bpe=True)
     src, trg = next(iter(test_loader))
     print("Source shape: ", src.shape)
     print("Target shape: ", trg.shape)
