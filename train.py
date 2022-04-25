@@ -409,6 +409,9 @@ def main():
                             torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9))
         train_model(model, train_iterator, valid_iterator,
                     optimizer, n_epochs, clip, args)
+        
+        logging.info("Running eval")
+        eval_model(model, test_iterator, args)
     else:
         logging.info(f"Eval only")
         logging.info(f"Loading data: {args.data_path}")
@@ -433,9 +436,8 @@ def main():
         logging.info(
             f'Loaded model from {args.ckpt_path} with {count_parameters(model)} parameters')
 
-    # evaluate model
-    logging.info("Running eval")
-    eval_model(model, test_iterator, args)
+        logging.info("Running eval")
+        eval_model(model, test_iterator, args)
 
 
 if __name__ == "__main__":
