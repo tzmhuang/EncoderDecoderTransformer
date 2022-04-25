@@ -364,9 +364,11 @@ def main():
         ]
     )
 
+    device_count =  torch.cuda.device_count()
+    
     # config
-    dim_model = 128
-    dim_hidden = 512
+    dim_model = 512
+    dim_hidden = 2048
     num_layers = 6
     num_heads = 8
     n_epochs = 10
@@ -401,6 +403,10 @@ def main():
         logging.info(f"Running on: {device}")
         model = Transformer.TransformerModel(
             dim_model, dim_hidden, src_vocab_dim, trg_vocab_dim, N=num_layers, h=num_heads).to(device)
+        if device_count > 1:
+            logging.info(f"device count: {device_count}")
+            model = nn.DataParallel(model)
+        model.to(device)
 
         logging.info(model)
         logging.info(
@@ -427,6 +433,11 @@ def main():
         logging.info(f"Running on: {device}")
         model = Transformer.TransformerModel(
             dim_model, dim_hidden, src_vocab_dim, trg_vocab_dim, N=num_layers, h=num_heads)
+
+        if device_count > 1:
+            logging.info(f"device count: {device_count}")
+            model = nn.DataParallel(model)
+        model.to(device)
 
         if os.path.exists(args.ckpt_path):
             logging.error(f"Ckpt not found: {args.ckpt_path}")
