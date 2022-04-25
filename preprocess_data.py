@@ -24,10 +24,9 @@ from torchtext.vocab import vocab
 import sources
 
 sys.path.append('subword-nmt')
-from learn_bpe import learn_bpe
-from apply_bpe import BPE
-
 from helper import *
+from apply_bpe import BPE
+from learn_bpe import learn_bpe
 
 class TqdmUpTo(tqdm):
     def update_to(self, b=1, bsize=1, tsize=None):
@@ -68,7 +67,6 @@ def _text_iter(dir):
 def download_and_extract(download_dir, url, src_filename, trg_filename):
     src_path = file_exist(download_dir, src_filename)
     trg_path = file_exist(download_dir, trg_filename)
-
 
     if src_path and trg_path:
         sys.stderr.write(f"Already downloaded and extracted {url}.\n")
@@ -113,8 +111,10 @@ def get_source_files(source_dir, data_source, task, src, trg):
     raw_files = {"src": [], "trg": [], }
     for d in data_source['data'][task]:
         if data_source['split'] == 'test':
-            _src_file = d['file'] + '-' + ''.join(task.split('-')) + '-src.'+src+'.sgm'
-            _trg_file = d['file'] + '-' + ''.join(task.split('-')) + '-ref.'+trg+'.sgm'
+            _src_file = d['file'] + '-' + \
+                ''.join(task.split('-')) + '-src.'+src+'.sgm'
+            _trg_file = d['file'] + '-' + \
+                ''.join(task.split('-')) + '-ref.'+trg+'.sgm'
         else:
             _src_file = d['file'] + '.' + src
             _trg_file = d['file'] + '.' + trg
@@ -125,6 +125,7 @@ def get_source_files(source_dir, data_source, task, src, trg):
         raw_files["trg"].append(trg_file)
     return raw_files
 
+
 def process_sgm_files(raw_dir, fpath):
 
     pfpath = os.path.join(raw_dir, fpath.split("/")[-1] + '.processed')
@@ -132,10 +133,10 @@ def process_sgm_files(raw_dir, fpath):
     if os.path.isfile(pfpath):
         sys.stderr.write(f"Proccessed file found, skipping.\n")
         return pfpath
-    
+
     sys.stderr.write(f"Processing: {fpath}.\n")
 
-    CMD= ''' grep '<seg id' {} | \\
+    CMD = ''' grep '<seg id' {} | \\
         sed -e 's/<seg id="[0-9]*">\s*//g' | \\
         sed -e 's/\s*<\/seg>\s*//g' | \\
         sed -e "s/\’/\'/g" > {}
@@ -153,13 +154,14 @@ def compile_files(raw_dir, raw_files, prefix):
         sys.stderr.write(f"Merged files found, skip the merging process.\n")
         return src_fpath, trg_fpath
 
-    sys.stderr.write(f"Merge files into two files: {src_fpath} and {trg_fpath}.\n")
+    sys.stderr.write(
+        f"Merge files into two files: {src_fpath} and {trg_fpath}.\n")
 
     with open(src_fpath, 'w') as src_outf, open(trg_fpath, 'w') as trg_outf:
         for src_inf, trg_inf in zip(raw_files['src'], raw_files['trg']):
-            sys.stderr.write(f'  Input files: \n'\
-                    f'    - SRC: {src_inf}, and\n' \
-                    f'    - TRG: {trg_inf}.\n')
+            sys.stderr.write(f'  Input files: \n'
+                             f'    - SRC: {src_inf}, and\n'
+                             f'    - TRG: {trg_inf}.\n')
             with open(src_inf, newline='\n') as src_inf, open(trg_inf, newline='\n') as trg_inf:
                 cntr = 0
                 for i, line in enumerate(src_inf):
@@ -186,10 +188,11 @@ def create_bpe_codes(train_files, bpe_codes, code_size, min_freq, verbose=True):
                 for i, line in enumerate(infile):
                     f.write(line + '\n')
     with codecs.open(tmp_file, encoding='utf-8') as in_f:
-        with codecs.open(bpe_codes, 'w',encoding='utf-8') as out_f:
+        with codecs.open(bpe_codes, 'w', encoding='utf-8') as out_f:
             learn_bpe(in_f, out_f, code_size, min_freq, verbose)
     os.remove(tmp_file)
     return
+
 
 def bpe_encode(bpe, infile, outfile):
     sys.stderr.write(f"Endcoding {infile} --> {outfile}\n")
@@ -200,22 +203,24 @@ def bpe_encode(bpe, infile, outfile):
                 out_f.write(bpe.process_line(line))
     return
 
+
 def bpe_encode_files(bpe, src_in, trg_in, data_dir, name, src, trg):
     src_out = os.path.join(data_dir, name + '.' + src)
     trg_out = os.path.join(data_dir, name + '.' + trg)
-    
+
     if os.path.isfile(src_out) and os.path.isfile(trg_out):
         sys.stderr.write(f"Encode file found, skipping BPE encoding.\n")
         return src_out, trg_out
-    
+
     bpe_encode(bpe, src_in, src_out)
     bpe_encode(bpe, trg_in, trg_out)
     return src_out, trg_out
-    
+
+
 def copy_files(src_in, trg_in, data_dir, name, src, trg):
     src_out = os.path.join(data_dir, name + '.' + src)
     trg_out = os.path.join(data_dir, name + '.' + trg)
-    
+
     if os.path.isfile(src_out) and os.path.isfile(trg_out):
         sys.stderr.write(f"{src_out} and {trg_out} found, skip copying.\n")
         return src_out, trg_out
@@ -239,15 +244,18 @@ def main():
     parser.add_argument('--train_prefix', type=str, default='train')
     parser.add_argument('--test_prefix', type=str, default='test')
     parser.add_argument('--valid_prefix', type=str, default='valid')
-    parser.add_argument('--bpe_min_freq', type=int, default=1)
+    parser.add_argument('--bpe_min_freq', type=int, default=2)
     parser.add_argument('--min_freq', type=int, default=1)
+    parser.add_argument('--max_length', type=int,
+                        default=150, help='max length of sentence')
     parser.add_argument('--save_dir', type=str, required=True)
     parser.add_argument('--share_vocab', action='store_true')
     parser.add_argument('--use_bpe', action='store_true')
     parser.add_argument('--bpe_codes', type=str, default='bpe_codes')
-    parser.add_argument('--code_size', type=int, default=40000, help="BPE code size")
-    parser.add_argument('--sep', type=str, default="@@", help="BPE code seperator")
-
+    parser.add_argument('--code_size', type=int,
+                        default=40000, help="BPE code size")
+    parser.add_argument('--sep', type=str, default="@@",
+                        help="BPE code seperator")
 
     args = parser.parse_args()
     src = args.src_lang
@@ -275,25 +283,33 @@ def main():
     for s in ['src', 'trg']:
         for idx, f in enumerate(raw_test[s]):
             if f.split('/')[-1].split('.')[-1] == 'sgm':
-                raw_test[s][idx] = process_sgm_files(args.source_dir, raw_test[s][idx])
+                raw_test[s][idx] = process_sgm_files(
+                    args.source_dir, raw_test[s][idx])
 
     # Merge files together
-    train_src, train_trg = compile_files(args.source_dir, raw_train, prefix=task+'-train')
-    test_src, test_trg = compile_files(args.source_dir, raw_test, prefix=task+'-test')
-    val_src, val_trg = compile_files(args.source_dir, raw_val, prefix=task+'-val')
+    train_src, train_trg = compile_files(
+        args.source_dir, raw_train, prefix=task+'-train')
+    test_src, test_trg = compile_files(
+        args.source_dir, raw_test, prefix=task+'-test')
+    val_src, val_trg = compile_files(
+        args.source_dir, raw_val, prefix=task+'-val')
 
     tokenizers = {}
     if args.use_bpe:
         args.bpe_codes = os.path.join(args.data_dir, args.bpe_codes)
-        create_bpe_codes([train_src, train_trg], args.bpe_codes, args.code_size, args.bpe_min_freq, True)
+        create_bpe_codes([train_src, train_trg], args.bpe_codes,
+                         args.code_size, args.bpe_min_freq, True)
         print("BPE code generation finished")
         print("Building BPE tokenizer")
         with codecs.open(args.bpe_codes, encoding='utf-8') as codes:
             bpe = BPE(codes, separator=args.sep)
 
-        bpe_encode_files(bpe, train_src, train_trg, args.data_dir, 'train', src, trg)
-        bpe_encode_files(bpe, test_src, test_trg, args.data_dir, 'test', src, trg)
-        bpe_encode_files(bpe, val_src, val_trg, args.data_dir, 'valid', src, trg)
+        bpe_encode_files(bpe, train_src, train_trg,
+                         args.data_dir, 'train', src, trg)
+        bpe_encode_files(bpe, test_src, test_trg,
+                         args.data_dir, 'test', src, trg)
+        bpe_encode_files(bpe, val_src, val_trg,
+                         args.data_dir, 'valid', src, trg)
 
         # using simple split function as tokenizer
         tokenizers[src] = str.split
@@ -339,12 +355,14 @@ def main():
 
     print("Finished vocab generation")
     print("Source vocab size: ", len(src_vocab),
-          " Target vocab size", len(trg_vocab))
+          "Target vocab size: ", len(trg_vocab))
 
-    train = list(zip(_text_iter(train_file[src]), _text_iter(train_file[trg])))
-    test = list(zip(_text_iter(test_file[src]), _text_iter(test_file[trg])))
-    valid = list(zip(_text_iter(valid_file[src]), _text_iter(valid_file[trg])))
-
+    train = [t for t in zip(_text_iter(train_file[src]), _text_iter(
+        train_file[trg])) if (len(tokenizers[src](t[0])) <= args.max_length and len(tokenizers[trg](t[1])) <= args.max_length)]
+    test = [t for t in zip(_text_iter(test_file[src]), _text_iter(test_file[trg])) if (len(
+        tokenizers[src](t[0])) <= args.max_length and len(tokenizers[trg](t[1])) <= args.max_length)]
+    valid = [t for t in zip(_text_iter(valid_file[src]), _text_iter(
+        valid_file[trg])) if (len(tokenizers[src](t[0])) <= args.max_length and len(tokenizers[trg](t[1])) <= args.max_length)]
     data = {'setting': args,
             'vocab': {'src': src_vocab, 'trg': trg_vocab},
             'train': train,
