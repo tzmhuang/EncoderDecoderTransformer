@@ -320,10 +320,10 @@ def eval_model(model, data_iterator, args):
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     src_vocab = data_iterator.dataset.vocab['src']
     trg_vocab = data_iterator.dataset.vocab['trg']
-    loss = evaluate(model, valid_iterator, criterion)
-    ppl = math.exp(min(valid_loss, 100))
+    loss = evaluate(model, data_iterator, criterion)
+    ppl = math.exp(min(loss, 100))
     bleu, bleu1, bleu2, bleu3, bleu4 = show_bleu(
-        valid_iterator.dataset.data, src_vocab, trg_vocab, model, device)
+        data_iterator.dataset.data, src_vocab, trg_vocab, model, device)
     metric = {}
     metric['loss'] = loss
     metric['ppl'] = ppl
@@ -332,7 +332,7 @@ def eval_model(model, data_iterator, args):
     metric['bleu2'] = bleu2
     metric['bleu3'] = bleu3
     metric['bleu4'] = bleu4
-    log += [metrics]
+    log += [metric]
     log_name = os.path.join(args.log_dir, 'evaluate.log.json')
     with open(log_name, 'w') as f:
         json.dump(log, f)
