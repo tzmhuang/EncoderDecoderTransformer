@@ -112,9 +112,9 @@ def get_source_files(source_dir, data_source, task, src, trg):
     for d in data_source['data'][task]:
         if data_source['split'] == 'test':
             _src_file = d['file'] + '-' + \
-                ''.join(task.split('-')) + '-src.'+src+'.sgm'
+                ''.join(reversed(task.split('-'))) + '-src.'+src+'.sgm'
             _trg_file = d['file'] + '-' + \
-                ''.join(task.split('-')) + '-ref.'+trg+'.sgm'
+                ''.join(reversed(task.split('-'))) + '-ref.'+trg+'.sgm'
         else:
             _src_file = d['file'] + '.' + src
             _trg_file = d['file'] + '.' + trg
