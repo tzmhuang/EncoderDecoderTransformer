@@ -170,7 +170,7 @@ def cal_loss(pred, gold, trg_pad_idx, smoothing=True):
     return loss
 
 
-def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=5000):
+def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=1000):
     model.train()  # set as train model
     epoch_loss = 0
 
@@ -192,16 +192,9 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=500
         trg_padding_mask = Transformer.get_padding_mask(
             trg_in, PAD_IDX).to(device)
         peek_mask = Transformer.get_peek_mask(trg_in).to(device)
-        output = model(src, trg_in, src_padding_mask,
+        loss = model(src, trg_in, trg_y, src_padding_mask,
                        trg_padding_mask, peek_mask)
-        # output: [batch size, trg_len - 1, output_dim]
-        # trg: [batch size, trg_len]
-        output_dim = output.shape[-1]
-        output = output.contiguous().view(-1, output_dim)
-        # Exclude index 0 (<sos>) of output word
-        trg_y = trg_y.contiguous().view(-1)
-        # calculate the loss
-        loss = cal_loss(output, trg_y, PAD_IDX, True)
+        loss = loss.mean()
         loss.backward()
         # gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
@@ -212,7 +205,7 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=500
         if (i+1) % log_iter == 0:
             train_ppl = math.exp(min(loss, 100))
             logging.info(
-                f"epoch {epoch_num} | bacth: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
+                f"epoch {epoch_num} | batch: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
 
     return epoch_loss / len(iterator)
 
@@ -238,22 +231,9 @@ def evaluate(model, iterator, criterion):
             trg_padding_mask = Transformer.get_padding_mask(
                 trg_in, PAD_IDX).to(device)
             peek_mask = Transformer.get_peek_mask(trg_in).to(device)
-            output = model(src, trg_in, src_padding_mask,
-                           trg_padding_mask, peek_mask)
-
-            # output: [batch size, trg_len - 1, output_dim]
-            # trg: [batch size, trg_len]
-            output_dim = output.shape[-1]
-
-            output = output.contiguous().view(-1, output_dim)
-            # Exclude index 0 (<sos>) of output word
-            trg_y = trg_y.contiguous().view(-1)
-
-            # output: [batch size * trg_len - 1, output_dim]
-            # trg: [batch size * trg len - 1]
-
-            # calculate the loss
-            loss = cal_loss(output, trg_y, PAD_IDX, True)
+            loss = model(src, trg_in, trg_y, src_padding_mask,
+                        trg_padding_mask, peek_mask)
+            loss = loss.mean()
 
             # calculate total loss
             epoch_loss += loss.item()
@@ -320,10 +300,15 @@ def eval_model(model, data_iterator, args):
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     src_vocab = data_iterator.dataset.vocab['src']
     trg_vocab = data_iterator.dataset.vocab['trg']
+    start_time = time.time()
     loss = evaluate(model, data_iterator, criterion)
+    end_time = time.time()
+    epoch_mins, epoch_secs = epoch_time(start_time, end_time)
     ppl = math.exp(min(loss, 100))
+    logging.info(f'Evaluation | Time: {epoch_mins}m {epoch_secs}s |'
+                     + f' loss: {valid_loss:.3f} ppl: {valid_ppl} |')
     bleu, bleu1, bleu2, bleu3, bleu4 = show_bleu(
-        data_iterator.dataset.data, src_vocab, trg_vocab, model, device)
+        data_iterator.dataset.data, src_vocab, trg_vocab, model.module, device)
     metric = {}
     metric['loss'] = loss
     metric['ppl'] = ppl

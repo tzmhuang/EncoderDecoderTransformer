@@ -20,7 +20,7 @@ from helper import *
 
 def get_peek_mask(X):
     B, L = X.size()
-    mask = (torch.ones(1, L,L)).triu(1)
+    mask = (torch.ones(B, L,L)).triu(1)
     return mask > 0
 
 def get_padding_mask(X, pad_token):
@@ -200,7 +200,30 @@ class TransformerModel(nn.Module):
         trg_emb = self.dec_positional_encoding(self.trg_embedding(X))
         return self.decoder(trg_emb, E, src_padding_mask, trg_padding_mask, peek_mask)
         
-    def forward(self, src, trg, src_padding_mask, trg_padding_mask, peek_mask):
+    def forward(self, src, trg, trg_y, src_padding_mask, trg_padding_mask, peek_mask):
         enc = self.encode(src, src_padding_mask)
         dec = self.decode(trg, enc, src_padding_mask, trg_padding_mask, peek_mask)
-        return self.generator(dec) # output are logits
+        pred = self.generator(dec)
+        pred = pred.contiguous().view(-1, pred.size(-1))
+        trg_y = trg_y.contiguous().view(-1)
+        loss = self.cal_loss(pred, trg_y, PAD_IDX, True)
+        return loss.unsqueeze(0)
+
+    def cal_loss(self, pred, gold, trg_pad_idx, smoothing=True):
+        gold = gold.contiguous().view(-1)
+
+        if smoothing:
+            eps = 0.1
+            n_class = pred.size(-1)
+            # gold = gold.type(torch.LongTensor).to(device)
+            one_hot = torch.zeros_like(pred).scatter(1, gold.view(-1, 1), 1)
+            one_hot = one_hot * (1 - eps) + (1 - one_hot) * eps / (n_class - 1)
+            log_prb = F.log_softmax(pred, dim=1)
+
+            non_pad_mask = gold.ne(trg_pad_idx)
+            loss = -(one_hot * log_prb).sum(dim=1)
+            loss = loss.masked_select(non_pad_mask).mean()
+        else:
+            loss = F.cross_entropy(
+                pred, gold, ignore_index=trg_pad_idx, reduction='mean')
+        return loss
