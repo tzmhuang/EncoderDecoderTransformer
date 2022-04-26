@@ -1,4 +1,4 @@
-TASK = ['de-en', 'fr-en', 'zh-en']
+TASK = ['en-de', 'en-fr', 'en-zh']
 LANG = ['en', 'de', 'fr']
 LANG_MODEL = {'en': 'en_core_web_sm',
               'de': 'de_core_news_sm', 'fr': 'fr_core_news_sm'}
