@@ -161,7 +161,7 @@ class Decoder(nn.Module):
         self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for _ in range(N)])
     
     def forward(self, X, E, src_padding_mask, trg_padding_mask, peek_mask):
-        trg_mask = trg_padding_mask & peek_mask
+        trg_mask = trg_padding_mask | peek_mask
         src_mask = src_padding_mask
         for layer in self.layers:
             X = layer(X, E, src_mask, trg_mask)
