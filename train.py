@@ -275,7 +275,7 @@ def train_model(model, train_iterator, valid_iterator, optimizer, n_epochs, clip
         metrics = {}
         start_time = time.time()  # record the start time
 
-        train_loss = train(model, train_iterator, optimizer, criterion, clip)
+        train_loss = train(model, train_iterator, optimizer, criterion, epoch, clip)
         train_ppl = math.exp(min(train_loss, 100))
 
         valid_loss = evaluate(model, valid_iterator, criterion)
