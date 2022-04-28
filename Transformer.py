@@ -109,15 +109,16 @@ class EncoderLayer(nn.Module):
             nn.ReLU(),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
-        self.norm = nn.LayerNorm(dim_model)
+        self.norm1 = nn.LayerNorm(dim_model)
+        self.norm2 = nn.LayerNorm(dim_model)
         self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, X, padding_mask):
         A = self.attention(Q = X, K = X, V = X, mask=padding_mask)
-        A = self.norm(A + X)
+        A = self.norm1(A + X)
         F = self.FFN(A)
         F = self.dropout(F)
-        return self.norm(F + A)
+        return self.norm2(F + A)
     
 
 class Encoder(nn.Module):
@@ -142,17 +143,19 @@ class DecoderLayer(nn.Module):
             nn.ReLU(),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
-        self.norm = nn.LayerNorm(dim_model)
+        self.norm1 = nn.LayerNorm(dim_model)
+        self.norm2 = nn.LayerNorm(dim_model)
+        self.norm3 = nn.LayerNorm(dim_model)
         self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, X, encoder_feature, src_mask, trg_mask): # (X, encoder_feature)
         masked_A = self.masked_attention(Q = X, K = X, V = X, mask = trg_mask)
-        masked_A = self.norm(masked_A + X)
+        masked_A = self.norm1(masked_A + X)
         A = self.attention(Q = masked_A, K = encoder_feature, V = encoder_feature, mask = src_mask)
-        A = self.norm(A + masked_A)
+        A = self.norm2(A + masked_A)
         F = self.FFN(A)
         F = self.dropout(F)
-        return self.norm(F + A)
+        return self.norm3(F + A)
 
 class Decoder(nn.Module):
     def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1):
