@@ -180,7 +180,7 @@ class Generator(nn.Module):
         return self.linear(X)
 
 class TransformerModel(nn.Module):
-    def __init__(self, dim_model, dim_hidden, src_dim_vocab, trg_dim_vocab, N=6, h=8, dropout=0.1, weight_sharing=True):
+    def __init__(self, dim_model, dim_hidden, src_dim_vocab, trg_dim_vocab, N=6, h=8, dropout=0.1, weight_sharing=False):
         super().__init__()
 
         self.encoder = Encoder(N, dim_model, dim_hidden, h, dropout)
@@ -191,9 +191,12 @@ class TransformerModel(nn.Module):
         self.enc_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
         self.dec_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
 
-        if weight_sharing:
-            self.generator.linear.weight = self.trg_embedding.embedding.weight
-            self.src_embedding.embedding.weight = self.trg_embedding.embedding.weight
+        # if weight_sharing:
+        #     self.generator.linear.weight = self.trg_embedding.embedding.weight
+        #     self.src_embedding.embedding.weight = self.trg_embedding.embedding.weight
+        # print(self.generator.linear)
+        # print()
+
     
     def encode(self, X, padding_mask):
         src_emb = self.enc_positional_encoding(self.src_embedding(X))

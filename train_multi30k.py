@@ -26,9 +26,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # set seed
-torch.manual_seed(0)
-random.seed(0)
-np.random.seed(0)
+torch.manual_seed(1)
+random.seed(1)
+np.random.seed(1)
 
 class NoamOpt:
     "Optim wrapper that implements rate."
@@ -78,19 +78,13 @@ def epoch_time(start_time, end_time):
 #     return model
 
 
-def translate_sentence(sentence, src_field, trg_field, model, max_len=2000, logging=True):
+def translate_sentence(sentence_tok, src_field, trg_field, model, max_len=2000, logging=True):
     model.eval()  # change into the evaluation mode
 
-    if isinstance(sentence, str):
-        nlp = spacy.load("en_core_web_sm")
-        tokens = [token.text.lower() for token in nlp(sentence)]
-    else:
-        tokens = [token.lower() for token in sentence]
-
     # append <sos> token at the beginning and <eos> token at the end
-    tokens = [special_symbols[2]] + tokens + [special_symbols[3]]
+    tokens = [special_symbols[2]] + sentence_tok + [special_symbols[3]]
     if logging:
-        print(f"full source token: {tokens}")
+        print(f"full source token: {sentence_tok}")
 
     src_indexes = src_field.lookup_indices(tokens)
     if logging:
@@ -134,13 +128,19 @@ def show_bleu(data_iterator, src_field, trg_field, model, device, max_len=50):
     desc = '    - calculating BLEU - '
     for d in tqdm(data_iterator.dataset, mininterval=2, desc=desc, leave=False):
         src, trg = d  # strings not tensor
-        trg_tok = trg_tokenizer(trg)
-        src_tok = src_tokenizer(src)
+        trg_tok = trg_tokenizer(trg.lower())
+        src_tok = src_tokenizer(src.lower())
         pred_trg = translate_sentence(
-            src, src_field, trg_field, model, max_len, logging=False)
+            src_tok, src_field, trg_field, model, max_len, logging=False)
         # Remove <bos> <eos> token
         pred_trgs.append(pred_trg[1:-1])
         trgs.append([trg_tok])
+        # print("src: ", src_tok)
+        # print("-"*100)
+        # print("trg: ", trg_tok)
+        # print("-"*100)
+        # print("pred: ", pred_trg[1:-1] )
+        # print("="*100)
 
     bleu = bleu_score(pred_trgs, trgs, max_n=4,
                       weights=[0.25, 0.25, 0.25, 0.25])
@@ -188,10 +188,12 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
     for i, batch in enumerate(iterator):
         n_batch += 1
         src, trg = batch
+        # print("Input: ", src, src.shape)
+        # print("Input: ", trg, trg.shape)
         src = src.to(device)
         trg = trg.to(device)
 
-        optimizer.zero_grad()
+        optimizer.optimizer.zero_grad()
 
         trg_in = trg[:, :-1].clone().to(device)
         trg_y = trg[:, 1:].clone().to(device)
@@ -211,7 +213,7 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
         # Exclude index 0 (<sos>) of output word
         trg_y = trg_y.contiguous().view(-1)
         # calculate the loss
-        loss = cal_loss(output, trg_y, PAD_IDX, False)
+        loss = cal_loss(output, trg_y, PAD_IDX, True)
         loss.backward()
         # gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
@@ -263,7 +265,7 @@ def evaluate(model, iterator, criterion):
             # trg: [batch size * trg len - 1]
 
             # calculate the loss
-            loss = cal_loss(output, trg_y, PAD_IDX, False)
+            loss = cal_loss(output, trg_y, PAD_IDX, True)
 
             # calculate total loss
             epoch_loss += loss.item()
@@ -418,9 +420,9 @@ def main():
             f'Created model: The model has {count_parameters(model)} trainable parameters')
         model.apply(initialize_weights)
         # Adam optimizer with lr scheduling
-        # optimizer = NoamOpt(dim_model, 1, warmup,
-        #                     torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9))
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+        optimizer = NoamOpt(dim_model, 1, warmup,
+                            torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9))
+        # optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
         train_model(model, train_iterator, valid_iterator,
                     optimizer, n_epochs, clip, args)
 
@@ -428,7 +430,7 @@ def main():
         eval_model(model, test_iterator, args)
     else:
         logging.info(f"Eval only")
-        logging.info(f"Loading data: {args.data_path}")
+        logging.info(f"Loading data...")
         test_iterator = Multi30kDataLoader(
             'en', 'de', 'test', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe)
         logging.info(f"Test dataset: {len(test_iterator)} \n")
@@ -442,7 +444,7 @@ def main():
 
 
         model.to(device)
-
+        args.ckpt_path = os.path.join(args.log_dir, 'transformer_best.ckpt') 
         if not os.path.exists(args.ckpt_path):
             logging.error(f"Ckpt not found: {args.ckpt_path}")
             return
