@@ -4,6 +4,7 @@ import math
 import time
 import argparse
 import logging
+import numpy as np
 
 import pickle
 from tqdm import tqdm
@@ -115,23 +116,25 @@ def translate_sentence(sentence, src_field, trg_field, model, max_len=2000, logg
                 break
 
     #  Convert each output word index to an actual word
-    trg_tokens = trg_field.lookup_tokens(trg_indexes)
+    trg_tokens = trg_field.lookup_tokens(trg_tensor.squeeze().tolist())
     # Returns the output statement excluding the first <sos>
-    return trg_tokens[1:]
+    return trg_tokens
 
 
-def show_bleu(data, src_field, trg_field, model, device, max_len=50):
+def show_bleu(dataset, src_field, trg_field, model, device, max_len=50):
     trgs = []
     pred_trgs = []
+    src_tokenizer, trg_tokenizer = dataset.get_tokenizer()
     desc = '    - calculating BLEU - '
-    for d in tqdm(data, mininterval=2, desc=desc, leave=False):
+    for d in tqdm(dataset.data, mininterval=2, desc=desc, leave=False):
         src, trg = d  # strings not tensor
+        trg_tok = trg_tokenizer(trg)
+        src_tok = src_tokenizer(src)
         pred_trg = translate_sentence(
             src, src_field, trg_field, model, max_len, logging=False)
-        # Remove the last <eos> token
-        pred_trg = pred_trg[:-1]
-        pred_trgs.append(pred_trg)
-        trgs.append([trg])
+        # Remove <bos> <eos> token
+        pred_trgs.append(pred_trg[1:-1])
+        trgs.append([trg_tok])
 
     bleu = bleu_score(pred_trgs, trgs, max_n=4,
                       weights=[0.25, 0.25, 0.25, 0.25])
@@ -150,7 +153,7 @@ def show_bleu(data, src_field, trg_field, model, device, max_len=50):
     return bleu, individual_bleu1_score, individual_bleu2_score, individual_bleu3_score, individual_bleu4_score
 
 
-def cal_loss(pred, gold, trg_pad_idx, smoothing=True):
+def cal_loss(pred, gold, trg_pad_idx, smoothing=False):
     gold = gold.contiguous().view(-1)
 
     if smoothing:
@@ -323,7 +326,7 @@ def eval_model(model, data_iterator, args):
     loss = evaluate(model, data_iterator, criterion)
     ppl = math.exp(min(loss, 100))
     bleu, bleu1, bleu2, bleu3, bleu4 = show_bleu(
-        data_iterator.dataset.data, src_vocab, trg_vocab, model, device)
+        data_iterator.dataset, src_vocab, trg_vocab, model, device)
     metric = {}
     metric['loss'] = loss
     metric['ppl'] = ppl
@@ -439,7 +442,7 @@ def main():
             model = nn.DataParallel(model)
         model.to(device)
 
-        if os.path.exists(args.ckpt_path):
+        if not os.path.exists(args.ckpt_path):
             logging.error(f"Ckpt not found: {args.ckpt_path}")
             return
         ckpt = torch.load(args.ckpt_path)
