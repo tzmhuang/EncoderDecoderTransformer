@@ -168,10 +168,10 @@ class Encoder(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()
-        # self.masked_attention = MultiHeadAttention(dim_model, h, dropout)
-        self.masked_attention = nn.MultiheadAttention(dim_model, h, dropout, batch_first=True)
-        # self.attention = MultiHeadAttention(dim_model, h, dropout)
-        self.attention = nn.MultiHeadAttention(dim_model, h, dropout, batch_first=True)
+        self.masked_attention = MultiHeadAttention(dim_model, h, dropout)
+        # self.masked_attention = nn.MultiheadAttention(dim_model, h, dropout, batch_first=True)
+        self.attention = MultiHeadAttention(dim_model, h, dropout)
+        # self.attention = nn.MultiHeadAttention(dim_model, h, dropout, batch_first=True)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
             nn.Dropout(p=dropout),
@@ -184,11 +184,11 @@ class DecoderLayer(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, X, encoder_feature, src_mask, trg_mask): # (X, encoder_feature)
-        # masked_A = self.masked_attention(Q = X, K = X, V = X, mask = trg_mask)
-        masked_A,_ = self.masked_attention(X, X, X, attn_mask = trg_mask)
+        masked_A = self.masked_attention(Q = X, K = X, V = X, mask = trg_mask)
+        # masked_A,_ = self.masked_attention(X, X, X, attn_mask = trg_mask)
         masked_A = self.norm1(masked_A + X)
-        # A = self.attention(Q = masked_A, K = encoder_feature, V = encoder_feature, mask = src_mask)
-        A = self.attention(masked_A, encoder_feature, encoder_feature, key_padding_mask = src_mask)
+        A = self.attention(Q = masked_A, K = encoder_feature, V = encoder_feature, mask = src_mask)
+        # A = self.attention(masked_A, encoder_feature, encoder_feature, key_padding_mask = src_mask)
         A = self.norm2(A + masked_A)
         F = self.FFN(A)
         F = self.dropout(F)
