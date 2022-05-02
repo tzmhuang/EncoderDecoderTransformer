@@ -74,10 +74,26 @@ The generate data file has the following structure:
 
 
 
-### Training transformer for translation
+### Training transformer for translation on the WMT dataset
+
+#### Our method
 
 ```
 python train.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 16 --log_dir ./log
+```
+
+#### Baseline
+
+```
+python train_baseline.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 16 --log_dir ./log
+```
+
+### Training transformer for translation on the Multi30k dataset
+
+#### Baseline
+
+```
+python train_multi30k_baseline.py --log_dir ./log
 ```
 
 ## Dataset
