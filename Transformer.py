@@ -34,7 +34,6 @@ class ScaledDPAttention(nn.Module):
         self.sm = nn.Softmax(dim=-1)
     
     def forward(self, q, k, v, mask):
-        B, L, D = q.size()
         output = torch.matmul(q, k.transpose(-2, -1))
         output = torch.div(output, self.scale)
         # mask = (-1*torch.ones(L,L)*float('inf')).triu(1)
@@ -44,34 +43,65 @@ class ScaledDPAttention(nn.Module):
         output = torch.matmul(output, v)
         return output
 
+# class MultiHeadAttention(nn.Module):
+#     def __init__(self, dim_model, h, dropout=0.1): # dim_key, dim_val = dim_model/h (?)
+#         super().__init__()
+#         self.h = h
+#         self.dim_model = dim_model
+#         self.dim_head = dim_model // h
+    
+#         linear_layer = nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False)
+#         attention_layer = ScaledDPAttention(self.dim_head)
+
+#         self.v_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
+#         self.k_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
+#         self.q_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
+#         self.attention_layers = nn.ModuleList([copy.deepcopy(attention_layer) for _ in range(self.h)])
+
+#         self.linear = nn.Linear(in_features = dim_model, out_features=dim_model, bias=False)
+#         self.dropout = nn.Dropout(p=dropout)
+    
+#     def forward(self, Q, K, V, mask):
+#         outs = []
+#         for i in range(self.h):
+#             q = self.q_layers[i](Q)
+#             k = self.k_layers[i](K)
+#             v = self.v_layers[i](V)
+#             o = self.attention_layers[i](q, k, v, mask)
+#             outs.append(o)
+#         output = torch.cat(outs, dim=-1) # check dimenson
+#         return self.dropout(self.linear(output))
+
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, dim_model, h, dropout=0.1): # dim_key, dim_val = dim_model/h (?)
         super().__init__()
         self.h = h
         self.dim_model = dim_model
         self.dim_head = dim_model // h
-    
-        linear_layer = nn.Linear(in_features=dim_model, out_features=self.dim_head, bias=False)
-        attention_layer = ScaledDPAttention(self.dim_head)
+        assert (self.dim_head * h == dim_model)
 
-        self.v_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
-        self.k_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
-        self.q_layers = nn.ModuleList([copy.deepcopy(linear_layer) for _ in range(self.h)])
-        self.attention_layers = nn.ModuleList([copy.deepcopy(attention_layer) for _ in range(self.h)])
+        self.v_layer = nn.Linear(in_features=dim_model, out_features=self.dim_model, bias=True)
+        self.k_layer = nn.Linear(in_features=dim_model, out_features=self.dim_model, bias=True)
+        self.q_layer = nn.Linear(in_features=dim_model, out_features=self.dim_model, bias=True)
+        self.attention_layer = ScaledDPAttention(self.dim_head)
 
-        self.linear = nn.Linear(in_features = h*self.dim_head, out_features=dim_model, bias=False)
+        self.linear = nn.Linear(in_features = dim_model, out_features=dim_model, bias=True)
         self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, Q, K, V, mask):
-        outs = []
-        for i in range(self.h):
-            q = self.q_layers[i](Q)
-            k = self.k_layers[i](K)
-            v = self.v_layers[i](V)
-            o = self.attention_layers[i](q, k, v, mask)
-            outs.append(o)
-        output = torch.cat(outs, dim=-1) # check dimenson
-        return self.dropout(self.linear(output))
+        b, lq, lk, lv = Q.size(0), Q.size(1), K.size(1), V.size(1)
+        q = self.q_layer(Q).view(b, lq, self.h, self.dim_head)
+        k = self.k_layer(K).view(b, lk, self.h, self.dim_head)
+        v = self.v_layer(V).view(b, lv, self.h, self.dim_head)
+        q = q.transpose(1,2)
+        k = k.transpose(1,2)
+        v = v.transpose(1,2)
+        mask = mask.unsqueeze(1)
+        attn = self.attention_layer(q, k, v, mask)  # check broadcasting
+        attn = attn.transpose(1,2).contiguous().view(b, lq, -1)
+        return self.dropout(self.linear(attn))
 
 
 class PositionalEncoding(nn.Module):
@@ -106,6 +136,7 @@ class EncoderLayer(nn.Module):
         self.attention = MultiHeadAttention(dim_model, h, dropout)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
+            nn.Dropout(p=dropout),
             nn.ReLU(),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
@@ -126,20 +157,24 @@ class Encoder(nn.Module):
         super().__init__()
         encoder_layer = EncoderLayer(dim_model, dim_hidden, h, dropout)
         self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(N)])
+        self.norm = nn.LayerNorm(dim_model)
 
     def forward(self, X, padding_mask):
         for layer in self.layers:
             X = layer(X, padding_mask)
-        return X
+        return self.norm(X)
 
 
 class DecoderLayer(nn.Module):
     def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1):
         super().__init__()
-        self.masked_attention = MultiHeadAttention(dim_model, h, dropout)
-        self.attention = MultiHeadAttention(dim_model, h, dropout)
+        # self.masked_attention = MultiHeadAttention(dim_model, h, dropout)
+        self.masked_attention = nn.MultiheadAttention(dim_model, h, dropout, batch_first=True)
+        # self.attention = MultiHeadAttention(dim_model, h, dropout)
+        self.attention = nn.MultiHeadAttention(dim_model, h, dropout, batch_first=True)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
+            nn.Dropout(p=dropout),
             nn.ReLU(),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
@@ -149,9 +184,11 @@ class DecoderLayer(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
     
     def forward(self, X, encoder_feature, src_mask, trg_mask): # (X, encoder_feature)
-        masked_A = self.masked_attention(Q = X, K = X, V = X, mask = trg_mask)
+        # masked_A = self.masked_attention(Q = X, K = X, V = X, mask = trg_mask)
+        masked_A,_ = self.masked_attention(X, X, X, attn_mask = trg_mask)
         masked_A = self.norm1(masked_A + X)
-        A = self.attention(Q = masked_A, K = encoder_feature, V = encoder_feature, mask = src_mask)
+        # A = self.attention(Q = masked_A, K = encoder_feature, V = encoder_feature, mask = src_mask)
+        A = self.attention(masked_A, encoder_feature, encoder_feature, key_padding_mask = src_mask)
         A = self.norm2(A + masked_A)
         F = self.FFN(A)
         F = self.dropout(F)
@@ -162,18 +199,19 @@ class Decoder(nn.Module):
         super().__init__()
         decoder_layer = DecoderLayer(dim_model, dim_hidden, h, dropout)
         self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for _ in range(N)])
+        self.norm = nn.LayerNorm(dim_model)
     
     def forward(self, X, E, src_padding_mask, trg_padding_mask, peek_mask):
         trg_mask = trg_padding_mask | peek_mask
         src_mask = src_padding_mask
         for layer in self.layers:
             X = layer(X, E, src_mask, trg_mask)
-        return X
+        return self.norm(X)
 
 class Generator(nn.Module):
     def __init__(self, dim_model, dim_output):
         super().__init__()
-        self.linear = nn.Linear(in_features=dim_model, out_features = dim_output, bias=False)
+        self.linear = nn.Linear(in_features=dim_model, out_features = dim_output, bias=True)
         # self.softmax = nn.Softmax(dim=-1)
     
     def forward(self, X, logit=True):
