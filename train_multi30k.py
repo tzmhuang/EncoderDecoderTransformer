@@ -265,7 +265,7 @@ def evaluate(model, iterator, criterion):
             # trg: [batch size * trg len - 1]
 
             # calculate the loss
-            loss = cal_loss(output, trg_y, PAD_IDX, True)
+            loss = cal_loss(output, trg_y, PAD_IDX, False)
 
             # calculate total loss
             epoch_loss += loss.item()
@@ -377,8 +377,8 @@ def main():
     
     # config
     dim_model = 512
-    dim_hidden = 256
-    num_layers = 3
+    dim_hidden = 2048
+    num_layers = 6
     num_heads = 8
     n_epochs = 10
     warmup = 4000
@@ -390,6 +390,8 @@ def main():
     def initialize_weights(m):
         if hasattr(m, 'weight') and m.weight.dim() > 1:
             nn.init.xavier_uniform_(m.weight.data)
+        if hasattr(m, 'bias') and m.bias is not None:
+            nn.init.constant(m.bias, 0.0)
 
     if not args.eval_only:
         logging.info("Running train")
