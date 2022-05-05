@@ -21,6 +21,9 @@ import Transformer
 from helper import *
 from Multi30kDataLoader import Multi30kDataLoader
 
+# from torch.utils.tensorboard import SummaryWriter
+import nltk
+
 torch.cuda.empty_cache()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -29,6 +32,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.manual_seed(1)
 random.seed(1)
 np.random.seed(1)
+# tb = SummaryWriter('./tb_log/train_multi30k_debug')
+
 
 class NoamOpt:
     "Optim wrapper that implements rate."
@@ -66,96 +71,118 @@ def epoch_time(start_time, end_time):
     return elapsed_mins, elapsed_secs
 
 
-# def load_model(resume_iters):
-#     # [TODO] pass in variables
-#     print('Loading the trained models from step {}...'.format(resume_iters))
-#     model_path = os.path.join('model/transformer_{}.pt'.format(resume_iters+1))
 
-#     model = Transformer.TransformerModel(
-#         dim_model, dim_hidden, dim_vocab, N=num_layers, h=num_heads)
-#     model.load_state_dict(torch.load(model_path))
-
-#     return model
-
-
-def translate_sentence(sentence_tok, src_field, trg_field, model, max_len=2000, logging=True):
+def translate_sentence(tokens, src_field, trg_field, model, max_len=2000, logging=True):
     model.eval()  # change into the evaluation mode
 
     # append <sos> token at the beginning and <eos> token at the end
-    tokens = [special_symbols[2]] + sentence_tok + [special_symbols[3]]
+    # special_symbols[2]] + sentence_tok + [special_symbols[3]
+    tokens = [special_symbols[2]] + tokens + [special_symbols[3]]
     if logging:
-        print(f"full source token: {sentence_tok}")
+        print(f"full source token: {tokens}")
 
-    src_indexes = src_field.lookup_indices(tokens)
+    src_indexes = [src_field[token] for token in tokens]
     if logging:
         print(f"source sentence index: {src_indexes}")
 
+
     src_tensor = torch.LongTensor(src_indexes).unsqueeze(0).to(device)
-    src_padding_mask = Transformer.get_padding_mask(
-        src_tensor, PAD_IDX).to(device)
-    enc_mem = model.encode(src_tensor, src_padding_mask)
-    # Make sure you have only one <sos> token at first
+    src_padding_mask = Transformer.get_padding_mask(src_tensor, PAD_IDX).to(device)
+
+    with torch.no_grad():
+        memory = model.encode(src_tensor, src_padding_mask)
+
     trg_indexes = [BOS_IDX]
-    trg_tensor = torch.LongTensor(trg_indexes).unsqueeze(0).to(device)
+
+    ys = torch.ones(1, 1).fill_(BOS_IDX).type(torch.long).to(device)
+
     with torch.no_grad():
         for i in range(max_len-1):
             # generate our output
+            memory = memory.to(device)
             trg_padding_mask = Transformer.get_padding_mask(
-                trg_tensor, PAD_IDX).to(device)
-            peek_mask = Transformer.get_peek_mask(trg_tensor).to(device)
-            dec = model.decode(trg_tensor, enc_mem,
+                ys, PAD_IDX).to(device)
+            peek_mask = Transformer.get_peek_mask(ys).to(device)
+            # print("ys shape: ", ys.shape)
+            # print("mem shape: ", memory.shape)
+            out = model.decode(ys, memory,
                                src_padding_mask, trg_padding_mask, peek_mask)
-            output = model.generator(dec)
+            # out = out.transpose(0, 1)
+            # print("out shape: ", out.shape)
+            # print("generator input shape: ", out[:, -1].shape)
+            prob = model.generator(out[:, -1])
+            # print("prob shape: ", prob.shape)
+            _, next_word = torch.max(prob, dim=1)
+            next_word = next_word.item()
 
-            pred_token = output.argmax(-1)[:, -1].item()
             # trg_indexes.append(pred_token)  # add to output statement
-            trg_tensor = torch.cat([trg_tensor, torch.ones(
-                1, 1).type_as(src_tensor.data).fill_(pred_token)], dim=1)
+            ys = torch.cat([ys,
+                            torch.ones(1, 1).type_as(src_tensor.data).fill_(next_word)], dim=1)
             # The moment you meet <eos>, it ends
-            if pred_token == EOS_IDX:
+            if next_word == EOS_IDX:
                 break
 
     #  Convert each output word index to an actual word
-    trg_tokens = trg_field.lookup_tokens(trg_tensor.squeeze().tolist())
-    # Returns the output statement excluding the first <sos>
-    return trg_tokens
+    trg_tokens = [trg_field.get_itos()[i] for i in ys.squeeze()]
+
+    # Returns the output statementz excluding the first <sos>
+    return trg_tokens[1:]
 
 
-def show_bleu(data_iterator, src_field, trg_field, model, device, max_len=50):
+def show_bleu(iterator, src_field, trg_field, model, device, max_len=50):
+    index = 0
     trgs = []
     pred_trgs = []
-    src_tokenizer, trg_tokenizer = data_iterator.get_tokenizer()
-    desc = '    - calculating BLEU - '
-    for d in tqdm(data_iterator.dataset, mininterval=2, desc=desc, leave=False):
-        src, trg = d  # strings not tensor
+    # t = SummaryWriter()
+    src_tokenizer, trg_tokenizer = iterator.get_tokenizer()
+
+    for datum in iterator.dataset[:]:
+        src, trg = datum
         trg_tok = trg_tokenizer(trg.lower())
         src_tok = src_tokenizer(src.lower())
-        pred_trg = translate_sentence(
-            src_tok, src_field, trg_field, model, max_len, logging=False)
-        # Remove <bos> <eos> token
-        pred_trgs.append(pred_trg[1:-1])
+        # src = vars(datum)['src']
+        # trg = vars(datum)['trg']
+
+        pred_trg = translate_sentence(src_tok, src_field, trg_field, model, max_len, logging=False)
+        # Remove the last <eos> token
+        pred_trg = pred_trg[:-1]
+
+        pred_trgs.append(pred_trg)
         trgs.append([trg_tok])
+        # try:
+        #     b = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
+        #     tb.add_scalar('bleu', b, index)
+        # except:
+        #     print(index)
+        #     print(pred_trg)
+        #     print(trg_tok)
+        index += 1
+        if (index + 1) % 100 == 0:
+            print(f"[{index + 1}/{len(iterator.dataset)}]")
+            print(f"pred: {pred_trg}")
+            print(f"trg: {trg_tok}")
         # print("src: ", src_tok)
         # print("-"*100)
-        # print("trg: ", trg_tok)
+        # print("trg: ", trgs)
         # print("-"*100)
-        # print("pred: ", pred_trg[1:-1] )
+        # print("pred: ", pred_trgs )
         # print("="*100)
 
-    bleu = bleu_score(pred_trgs, trgs, max_n=4,
-                      weights=[0.25, 0.25, 0.25, 0.25])
-    individual_bleu1_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[1, 0, 0, 0])
-    individual_bleu2_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[0, 1, 0, 0])
-    individual_bleu3_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[0, 0, 1, 0])
-    individual_bleu4_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[0, 0, 0, 1])
+    bleu = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
+
+    individual_bleu1_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[1, 0, 0, 0])
+    individual_bleu2_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[0, 1, 0, 0])
+    individual_bleu3_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[0, 0, 1, 0])
+    individual_bleu4_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[0, 0, 0, 1])
 
     logging.info(f'BLEU Score = {bleu*100:.2f}'
-                 + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
-                 + f'| BLEU-3 = {individual_bleu3_score*100:.2f} | BLEU-4 = {individual_bleu4_score*100:.2f}')
+    + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
+    + f'| BLEU-3 = {individual_bleu3_score*100:.2f} | BLEU-4 = {individual_bleu4_score*100:.2f}')
+    # t.close()
     return bleu, individual_bleu1_score, individual_bleu2_score, individual_bleu3_score, individual_bleu4_score
 
 
@@ -214,7 +241,17 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
         trg_y = trg_y.contiguous().view(-1)
         # calculate the loss
         loss = cal_loss(output, trg_y, PAD_IDX, True)
+        # tb.add_histogram('source', src,  epoch_num*iterator.data_size + i)
+        # tb.add_histogram('trg', trg,  epoch_num*iterator.data_size + i)
+        # tb.add_histogram('output', output,  epoch_num*iterator.data_size + i)
+        # debugg
+        # print("debugging")
+
+        # loss = criterion(output, trg_y)
+        # debug end
+
         loss.backward()
+
         # gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
         # update the parameters
@@ -226,6 +263,17 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
             logging.info(
                 f"epoch {epoch_num} | bacth: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
 
+            # tensorboard
+            # tb = SummaryWriter('./tb_log/train_multi30k_debug')
+            # tb.add_graph(model, [src, trg_in, src_padding_mask,
+            #             trg_padding_mask, peek_mask])
+            # for name, weight in model.named_parameters():
+            #     if weight is not None:
+            #         tb.add_histogram(name,weight, epoch_num*iterator.data_size + i)
+            #     if weight.grad is not None:
+            #         tb.add_histogram(f'{name}/grad',weight.grad, epoch_num*iterator.data_size + i)
+            # tb.close()
+            # end tensorboard
     return epoch_loss / len(iterator)
 
 
@@ -253,6 +301,17 @@ def evaluate(model, iterator, criterion):
             output = model(src, trg_in, src_padding_mask,
                            trg_padding_mask, peek_mask)
 
+            # # tensorboard
+            # if i == 1:
+            #     tb = SummaryWriter('./tb_log/train_multi30k_debug')
+            #     tb.add_graph(model, [src, trg_in, src_padding_mask,
+            #                trg_padding_mask, peek_mask])
+            #     for name, weight in model.named_parameters():
+            #         if weight is not None:
+            #             tb.add_histogram(name,weight, 0)
+            #             # tb.add_histogram(f'{name}.grad',weight.grad, 0)
+            #     tb.close()
+            # # end tensorboard
             # output: [batch size, trg_len - 1, output_dim]
             # trg: [batch size, trg_len]
             output_dim = output.shape[-1]
@@ -278,7 +337,7 @@ def train_model(model, train_iterator, valid_iterator, optimizer, n_epochs, clip
     # save the losses
     log = []
     # ignore the padding index
-    criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=0.1)
     best_valid_loss = float('inf')
     src_vocab = train_iterator.vocab['src']
     trg_vocab = train_iterator.vocab['trg']
@@ -389,9 +448,9 @@ def main():
 
     def initialize_weights(m):
         if hasattr(m, 'weight') and m.weight.dim() > 1:
-            nn.init.xavier_uniform_(m.weight.data)
+            nn.init.xavier_uniform_(m.weight.data, 0.5)
         if hasattr(m, 'bias') and m.bias is not None:
-            nn.init.constant(m.bias, 0.0)
+            nn.init.constant_(m.bias, 0)
 
     if not args.eval_only:
         logging.info("Running train")
@@ -424,7 +483,7 @@ def main():
         # Adam optimizer with lr scheduling
         optimizer = NoamOpt(dim_model, 1, warmup,
                             torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9))
-        # optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+        # optimizer = torch.optim.Adam(model.parameters(), lr=0.0001,betas=(0.9, 0.98), eps=1e-9)
         train_model(model, train_iterator, valid_iterator,
                     optimizer, n_epochs, clip, args)
 
@@ -446,7 +505,7 @@ def main():
 
 
         model.to(device)
-        args.ckpt_path = os.path.join(args.log_dir, 'transformer_best.ckpt') 
+        # args.ckpt_path = os.path.join(args.log_dir, 'transformer_best.ckpt') 
         if not os.path.exists(args.ckpt_path):
             logging.error(f"Ckpt not found: {args.ckpt_path}")
             return
@@ -463,3 +522,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # tb.close()
+

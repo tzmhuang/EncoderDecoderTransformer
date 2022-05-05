@@ -101,7 +101,8 @@ class MultiHeadAttention(nn.Module):
         mask = mask.unsqueeze(1)
         attn = self.attention_layer(q, k, v, mask)  # check broadcasting
         attn = attn.transpose(1,2).contiguous().view(b, lq, -1)
-        return self.dropout(self.linear(attn))
+        out = self.dropout(self.linear(attn))
+        return out
 
 
 class PositionalEncoding(nn.Module):
@@ -117,7 +118,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('encoding', encoding)
     
     def forward(self, X):
-        X = X + Variable(self.encoding[:,:X.size(1)], requires_grad=False)
+        X = X + self.encoding[:,:X.size(1)]
         return self.dropout(X)
 
 class TokenEmbedding(nn.Module):
@@ -136,8 +137,8 @@ class EncoderLayer(nn.Module):
         self.attention = MultiHeadAttention(dim_model, h, dropout)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
-            nn.Dropout(p=dropout),
             nn.ReLU(),
+            nn.Dropout(p=dropout),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
         self.norm1 = nn.LayerNorm(dim_model)
@@ -174,8 +175,8 @@ class DecoderLayer(nn.Module):
         # self.attention = nn.MultiHeadAttention(dim_model, h, dropout, batch_first=True)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
-            nn.Dropout(p=dropout),
             nn.ReLU(),
+            nn.Dropout(p=dropout),
             nn.Linear(in_features=dim_hidden, out_features=dim_model)
         )
         self.norm1 = nn.LayerNorm(dim_model)

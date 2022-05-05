@@ -4,27 +4,40 @@ import math
 import time
 import argparse
 import logging
+import random
 
 import pickle
 from tqdm import tqdm
 import spacy
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torchtext.data.metrics import bleu_score
-from torchtext.data import Field, BucketIterator
+# from torchtext.data import Field, BucketIterator
 from torchtext.datasets import Multi30k
 
-from nltk.translate.bleu_score import corpus_bleu
+# from nltk.translate.bleu_score import corpus_bleu
 
 import Transformer_baseline
 from helper import *
+from Multi30kDataLoader import Multi30kDataLoader
+
+# from torch.utils.tensorboard import SummaryWriter
+import nltk
 
 torch.cuda.empty_cache()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-torch.manual_seed(0)
+
+torch.manual_seed(1)
+random.seed(1)
+np.random.seed(1)
+
+
+# tb = SummaryWriter('./tb_log/train_multi30k_baseline')
+
 
 class NoamOpt:
     "Optim wrapper that implements rate."
@@ -89,23 +102,24 @@ def epoch_time(start_time, end_time):
 #     return model
 
 
-def translate_sentence(sentence, src_field, trg_field, model, max_len=2000, logging=True):
+def translate_sentence(tokens, src_field, trg_field, model, max_len=2000, logging=True):
     model.eval()  # change into the evaluation mode
 
-    if isinstance(sentence, str):
-        nlp = spacy.load("de")
-        tokens = [token.text.lower() for token in nlp(sentence)]
-    else:
-        tokens = [token.lower() for token in sentence]
+    # if isinstance(sentence, str):
+    #     nlp = spacy.load("de")
+    #     tokens = [token.text.lower() for token in nlp(sentence)]
+    # else:
+    #     tokens = [token.lower() for token in sentence]
     # src_tok = iterator.dataset.src_tokenizer(sentence)
 
 
     # append <sos> token at the beginning and <eos> token at the end
-    tokens = [src_field.init_token] + tokens + [src_field.eos_token]
+    tokens = [special_symbols[2]] + tokens + [special_symbols[3]]
     if logging:
         print(f"full source token: {tokens}")
 
-    src_indexes = [src_field.vocab.stoi[token] for token in tokens]
+    # print("Here: ", src_field)
+    src_indexes = [src_field[token] for token in tokens]
     if logging:
         print(f"source sentence index: {src_indexes}")
 
@@ -116,9 +130,9 @@ def translate_sentence(sentence, src_field, trg_field, model, max_len=2000, logg
     with torch.no_grad():
         memory = model.encode(src_tensor, src_mask)
 
-    trg_indexes = [trg_field.vocab.stoi[trg_field.init_token]]
+    trg_indexes = [BOS_IDX]
 
-    ys = torch.ones(1, 1).fill_(trg_field.vocab.stoi[trg_field.init_token]).type(torch.long).to(device)
+    ys = torch.ones(1, 1).fill_(BOS_IDX).type(torch.long).to(device)
 
     with torch.no_grad():
         for i in range(max_len-1):
@@ -136,41 +150,58 @@ def translate_sentence(sentence, src_field, trg_field, model, max_len=2000, logg
             ys = torch.cat([ys,
                             torch.ones(1, 1).type_as(src_tensor.data).fill_(next_word)], dim=0)
             # The moment you meet <eos>, it ends
-            if next_word == trg_field.vocab.stoi[trg_field.eos_token]:
+            if next_word == EOS_IDX:
                 break
 
     #  Convert each output word index to an actual word
-    trg_tokens = [trg_field.vocab.itos[i] for i in ys]
+    trg_tokens = [trg_field.get_itos()[i] for i in ys]
 
     # Returns the output statementz excluding the first <sos>
     return trg_tokens[1:]
 
 
 def show_bleu(iterator, data, src_field, trg_field, model, device, max_len=50):
+    index = 0
     trgs = []
     pred_trgs = []
+    src_tokenizer, trg_tokenizer = iterator.get_tokenizer()
 
     for datum in data:
-        src = vars(datum)['src']
-        trg = vars(datum)['trg']
+        # src = vars(datum)['src']
+        # trg = vars(datum)['trg']
+        src, trg = datum
+        trg_tok = trg_tokenizer(trg.lower())
+        src_tok = src_tokenizer(src.lower())
 
-        pred_trg = translate_sentence(src, src_field, trg_field, model, max_len, logging=False)
+        pred_trg = translate_sentence(src_tok, src_field, trg_field, model, max_len, logging=False)
         # Remove the last <eos> token
         pred_trg = pred_trg[:-1]
 
         pred_trgs.append(pred_trg)
-        trgs.append([trg])
+        trgs.append([trg_tok])
+        try:
+            b = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
+            tb.add_scalar('bleu', b, index)
+        except:
+            print(index)
+            print(pred_trg)
+            print(trg_tok)
+        index += 1
+        if (index + 1) % 100 == 0:
+            print(f"[{index + 1}/{len(iterator.dataset)}]")
+            print(f"pred: {pred_trg}")
+            print(f"trg: {trg_tok}")
 
-    bleu = bleu_score(pred_trgs, trgs, max_n=4, weights=[0.25, 0.25, 0.25, 0.25])
+    bleu = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
 
-    individual_bleu1_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[1, 0, 0, 0])
-    individual_bleu2_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[0, 1, 0, 0])
-    individual_bleu3_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[0, 0, 1, 0])
-    individual_bleu4_score = bleu_score(
-        pred_trgs, trgs, max_n=4, weights=[0, 0, 0, 1])
+    individual_bleu1_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[1, 0, 0, 0])
+    individual_bleu2_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[0, 1, 0, 0])
+    individual_bleu3_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[0, 0, 1, 0])
+    individual_bleu4_score = nltk.translate.bleu_score.corpus_bleu(
+        trgs, pred_trgs, weights=[0, 0, 0, 1])
 
     logging.info(f'BLEU Score = {bleu*100:.2f}'
     + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
@@ -205,8 +236,9 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
 
     # iterate through whole data set
     for i, batch in enumerate(iterator):
-        src = batch.src
-        trg = batch.trg
+        # src = batch.src
+        # trg = batch.trg
+        src, trg = batch
 
         src = src.transpose(0,1).to(device)
         trg = trg.transpose(0,1).to(device)
@@ -228,6 +260,10 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
         output = output.contiguous().view(-1, output_dim)
         # Exclude index 0 (<sos>) of output word
         trg_y = trg_y.contiguous().view(-1)
+
+        # tb.add_histogram('source', src,  epoch_num*iterator.data_size + i)
+        # tb.add_histogram('trg', trg,  epoch_num*iterator.data_size + i)
+        # tb.add_histogram('output', output,  epoch_num*iterator.data_size + i)
         # calculate the loss
         loss = cal_loss(output, trg_y, PAD_IDX, True)
         loss.backward()
@@ -237,11 +273,21 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
         optimizer.step()
         # calculate total loss
         epoch_loss += loss.item()
-        # if (i+1) % log_iter == 0:
-        #     train_ppl = math.exp(min(loss, 100))
-        #     logging.info(
-        #         f"epoch {epoch_num} | bacth: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
-
+        if (i+1) % log_iter == 0 or i==0:
+            train_ppl = math.exp(min(loss, 100))
+            logging.info(
+                f"epoch {epoch_num} | bacth: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
+            # tensorboard
+            # tb = SummaryWriter('./tb_log/train_multi30k_baseline')
+            # tb.add_graph(model, [src, trg_in, src_mask, tgt_mask, src_padding_mask,
+            #            tgt_padding_mask, src_padding_mask])
+            # for name, weight in model.named_parameters():
+            #     if weight is not None:
+            #         tb.add_histogram(name,weight, epoch_num*iterator.data_size + i)
+            #     if weight.grad is not None:
+            #         tb.add_histogram(f'{name}/grad',weight.grad, epoch_num*iterator.data_size + i)
+            # tb.close()
+            # end tensorboard
     return epoch_loss / len(iterator)
 
 
@@ -252,8 +298,9 @@ def evaluate(model, iterator, criterion):
     with torch.no_grad():
         # Checking the entire evaluation data
         for i, batch in enumerate(iterator):
-            src = batch.src
-            trg = batch.trg
+            src, trg = batch
+            # src = batch.src
+            # trg = batch.trg
 
             src = src.transpose(0,1).to(device)
             trg = trg.transpose(0,1).to(device)
@@ -267,6 +314,19 @@ def evaluate(model, iterator, criterion):
 
             output = model(src, trg_in, src_mask, tgt_mask, src_padding_mask,
                            tgt_padding_mask, src_padding_mask)
+
+
+            # # tensorboard
+            # if i == 1:
+            #     tb = SummaryWriter('./tb_log/train_multi30k_baseline')
+            #     tb.add_graph(model, [src, trg_in, src_mask, tgt_mask, src_padding_mask,
+            #                tgt_padding_mask, src_padding_mask])
+            #     for name, weight in model.named_parameters():
+            #         if weight is not None:
+            #             tb.add_histogram(name,weight, 0)
+            #             # tb.add_histogram(f'{name}.grad',weight.grad, 0)
+            #     tb.close()
+            # # end tensorboard
 
             # output: [batch size, trg_len - 1, output_dim]
             # trg: [batch size, trg_len]
@@ -365,6 +425,8 @@ def eval_model(model, data_iterator, dataset, args, src_vocab, trg_vocab):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--log_dir", type=str, required=True)
+    parser.add_argument("--use_bpe", action='store_true',
+                        help="True if data is in BPE")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--eval_only", action='store_true')
@@ -396,35 +458,53 @@ def main():
         return [token.text for token in spacy_en.tokenizer(text)]
 
     # load field tokenizer
-    SRC = Field(tokenize=tokenize_en, init_token="<sos>", eos_token="<eos>", lower=True, batch_first=True)
-    TRG = Field(tokenize=tokenize_de, init_token="<sos>", eos_token="<eos>", lower=True, batch_first=True)
+    # SRC = Field(tokenize=tokenize_en, init_token="<sos>", eos_token="<eos>", lower=True, batch_first=True)
+    # TRG = Field(tokenize=tokenize_de, init_token="<sos>", eos_token="<eos>", lower=True, batch_first=True)
 
-    # load datasets
-    train_dataset, valid_dataset, test_dataset = Multi30k.splits(exts=(".en", ".de"), fields=(SRC, TRG))
-    logging.info(f"training dataset: {len(train_dataset.examples)} \n"
-                 + f"validation dataset: {len(valid_dataset.examples)} \n"
-                 + f"Test dataset: {len(test_dataset.examples)} \n")
+    # # load datasets
+    # train_dataset, valid_dataset, test_dataset = Multi30k.splits(exts=(".en", ".de"), fields=(SRC, TRG))
+    # logging.info(f"training dataset: {len(train_dataset.examples)} \n"
+    #              + f"validation dataset: {len(valid_dataset.examples)} \n"
+    #              + f"Test dataset: {len(test_dataset.examples)} \n")
 
-    # build the vocabulary
-    SRC.build_vocab(train_dataset, min_freq=2)
-    TRG.build_vocab(train_dataset, min_freq=2)
-    logging.info(f"src_vocab: {len(SRC.vocab)} \n" +
-                 f"trg_vocab: {len(TRG.vocab)} \n")
+    # # build the vocabulary
+    # SRC.build_vocab(train_dataset, min_freq=2)
+    # TRG.build_vocab(train_dataset, min_freq=2)
+    # logging.info(f"src_vocab: {len(SRC.vocab)} \n" +
+    #              f"trg_vocab: {len(TRG.vocab)} \n")
+    # logging.info(f"Running on: {device}")
+
+    # # data loader
+    # train_iterator, valid_iterator, test_iterator = BucketIterator.splits(
+    #     (train_dataset, valid_dataset, test_dataset),
+    #     batch_size=args.batch_size,
+    #     device=device)
+
+
+    train_iterator = Multi30kDataLoader(
+        'en', 'de', 'train', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe, shuffle=True)
+    valid_iterator = Multi30kDataLoader(
+        'en', 'de', 'valid', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe, shuffle=True)
+    test_iterator = Multi30kDataLoader(
+        'en', 'de', 'test', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe, shuffle=True)
+    logging.info(f"training dataset: {train_iterator.data_size} \n"
+                    + f"validation dataset: {valid_iterator.data_size} \n"
+                    + f"Test dataset: {test_iterator.data_size} \n")
+
+    src_vocab_dim = len(train_iterator.vocab['src'])
+    trg_vocab_dim = len(train_iterator.vocab['trg'])
+
+    logging.info(f"src_vocab: {src_vocab_dim} \n" +
+                    f"trg_vocab: {trg_vocab_dim} \n")
     logging.info(f"Running on: {device}")
 
-    # data loader
-    train_iterator, valid_iterator, test_iterator = BucketIterator.splits(
-        (train_dataset, valid_dataset, test_dataset),
-        batch_size=args.batch_size,
-        device=device)
-
     # define padding index
-    SRC_PAD_IDX = SRC.vocab.stoi[SRC.pad_token]
-    TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
+    SRC_PAD_IDX = PAD_IDX
+    TRG_PAD_IDX = PAD_IDX
 
     # config
-    INPUT_DIM = len(SRC.vocab)
-    OUTPUT_DIM = len(TRG.vocab)
+    INPUT_DIM = src_vocab_dim
+    OUTPUT_DIM = trg_vocab_dim
     HIDDEN_DIM = 512
     ENC_LAYERS = 6
     DEC_LAYERS = 6
@@ -443,6 +523,8 @@ def main():
     def initialize_weights(m):
         if hasattr(m, 'weight') and m.weight.dim() > 1:
             nn.init.xavier_uniform_(m.weight.data)
+        if hasattr(m, 'bias') and m.bias is not None:
+            nn.init.constant_(m.bias, 0)
 
     if not args.eval_only:
         N_EPOCHS = 10
@@ -465,7 +547,7 @@ def main():
                     optimizer, N_EPOCHS, CLIP, args)
 
         logging.info("Running eval")
-        eval_model(model, test_iterator,test_dataset, args,SRC,TRG)
+        eval_model(model, test_iterator,test_iterator.dataset, args,train_iterator.vocab['src'],train_iterator.vocab['trg'])
     else:
         logging.info(f"Eval only")
 
@@ -482,8 +564,9 @@ def main():
             f'Loaded model from {args.ckpt_path} with {count_parameters(model)} parameters')
 
         logging.info("Running eval")
-        eval_model(model, test_iterator,test_dataset, args,SRC,TRG)
+        eval_model(model, test_iterator,test_iterator.dataset, args,test_iterator.vocab['src'],test_iterator.vocab['trg'])
 
 
 if __name__ == "__main__":
     main()
+    # tb.close()
