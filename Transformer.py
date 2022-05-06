@@ -230,12 +230,8 @@ class TransformerModel(nn.Module):
         self.enc_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
         self.dec_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
 
-        # if weight_sharing:
-        #     self.generator.linear.weight = self.trg_embedding.embedding.weight
-        #     self.src_embedding.embedding.weight = self.trg_embedding.embedding.weight
-        # print(self.generator.linear)
-        # print()
-
+        if weight_sharing:
+            self.generator.linear.weight = self.trg_embedding.embedding.weight
     
     def encode(self, X, padding_mask):
         src_emb = self.enc_positional_encoding(self.src_embedding(X))

@@ -70,7 +70,83 @@ def epoch_time(start_time, end_time):
     elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
     return elapsed_mins, elapsed_secs
 
+def beam_translate(sentence, src_field, trg_field, model, k, max_len=2000):
+    model.eval() # change into the evaluation mode
 
+    if isinstance(sentence, str):
+        nlp = spacy.load("en")
+        tokens = [token.text.lower() for token in nlp(sentence)]
+    else:
+        tokens = [token.lower() for token in sentence]
+
+    # append <sos> token at the beginning and <eos> token at the end
+    tokens = [src_field.init_token] + tokens + [src_field.eos_token]
+    src_indexes = [src_field.vocab.stoi[token] for token in tokens]
+
+    src_tensor = torch.LongTensor(src_indexes).unsqueeze(0).to(device)
+    src_mask = Transformer.get_padding_mask(src_tensor, PAD_IDX).to(device)
+    memory = model.encode(src_tensor, src_mask).to(device)
+
+    memory  = memory.expand(k,memory.shape[1],memory.shape[2])
+    src_mask = src_mask.expand(k,src_mask.shape[1],src_mask.shape[2])
+
+    k_prev_words = torch.full((k, 1), src_field.vocab.stoi[src_field.init_token], dtype=torch.long).to(device) # (k, 1)
+
+    seqs = k_prev_words.to(device) #(k, 1)
+    # prepare for beam search
+    top_k_scores = torch.zeros(k, 1).to(device)
+    complete_seqs = list()
+    complete_seqs_scores = list()
+    step = 1
+
+    while True:
+        tgt_mask = Transformer.get_padding_mask(
+            seqs, PAD_IDX).to(device)
+        peek_mask = Transformer.get_peek_mask(seqs).to(device)
+        out = model.decode(seqs, memory[:k],
+                           src_mask[:k], tgt_mask, peek_mask)
+        outputs = model.generator(out)
+        next_token_logits = outputs[:,-1,:] # (k, vocab_size)
+        next_token_logits = torch.log_softmax(next_token_logits, dim=-1)
+        next_token_logits += top_k_scores
+        if step == 1:
+            # the first step only has k BOS
+            top_k_scores, top_k_words = next_token_logits[0].topk(k, dim=0, largest=True, sorted=True)
+        else:
+            top_k_scores, top_k_words = next_token_logits.view(-1).topk(k, 0, True, True)
+        prev_word_inds = torch.div(top_k_words,len(trg_field.vocab),rounding_mode = 'floor')  # (k)  beam_id
+        next_word_inds = top_k_words % len(trg_field.vocab)  # (k) token_id
+
+        # seqs: (k, step) ==> (k, step+1)
+        seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)
+
+        # check whether their is EOS token
+        incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if next_word != trg_field.vocab.stoi[trg_field.eos_token]]
+        # output the beam id for those complete sentence
+        complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
+
+        # if there are some complete sentences
+        if len(complete_inds) > 0:
+            complete_seqs.extend(seqs[complete_inds].tolist()) # add complete sentences to the list
+            complete_seqs_scores.extend(top_k_scores[complete_inds]) # add the probability to the list
+        # update k
+        k -= len(complete_inds)
+
+        if k == 0: # find all the complete sentences
+            break
+
+        # update the incomplete sentences
+        seqs = seqs[incomplete_inds]
+        top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)   #(s, 1) s < k
+
+        if step > max_len:
+            break
+        step += 1
+
+    i = complete_seqs_scores.index(max(complete_seqs_scores))
+    seq = complete_seqs[i]
+    trg_tokens = [trg_field.vocab.itos[i] for i in seq]
+    return trg_tokens[1:]
 
 def translate_sentence(tokens, src_field, trg_field, model, max_len=2000, logging=True):
     model.eval()  # change into the evaluation mode
@@ -144,6 +220,9 @@ def show_bleu(iterator, src_field, trg_field, model, device, max_len=50):
         # trg = vars(datum)['trg']
 
         pred_trg = translate_sentence(src_tok, src_field, trg_field, model, max_len, logging=False)
+        # k = 5 # beam width
+        # pred_trg = beam_translate(src, src_field, trg_field, model, k)
+
         # Remove the last <eos> token
         pred_trg = pred_trg[:-1]
 
