@@ -17,6 +17,7 @@ from torch.backends import cudnn
 
 from helper import *
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_peek_mask(X):
     B, L = X.size()
@@ -42,6 +43,42 @@ class ScaledDPAttention(nn.Module):
         output = self.sm(output)
         output = torch.matmul(output, v)
         return output
+
+
+class RPScaledDPAttention(nn.Module):
+    def __init__(self, dim_head, max_len = 150):
+        super().__init__()
+        self.scale = math.sqrt(dim_head)
+        self.max_len = max_len
+        self.pos_embedding = nn.Parameter(torch.zeros(2*max_len + 1, dim_head))
+        self.sm = nn.Softmax(dim=-1)
+    
+    def forward(self, q, k, v, mask):
+        B, H, Lq, Dh = q.size()
+        Lk = k.size(2)
+        R = self.relative_pos(Lq,Lk) # lq, lk, dh
+        q_t = q.permute(2, 0, 1, 3).contiguous().view(Lq, B*H, Dh) # lq, b*h, dh
+        Rp = torch.matmul(q_t, R.transpose(1,2)).transpose(0,1)
+        Rp = Rp.contiguous().view(B, H, Lq, Lk)
+        output = torch.matmul(q, k.transpose(-2, -1)) + Rp
+
+        output = torch.div(output, self.scale)
+        # mask = (-1*torch.ones(L,L)*float('inf')).triu(1)
+        output = output.masked_fill(mask, -1*float('inf')) # masked if True; attention + padding
+#        output = output + q.size()[1]
+        output = self.sm(output)
+        output = torch.matmul(output, v)
+        return output
+    
+    def relative_pos(self, Lq, Lk):
+        R = torch.arange(Lk).unsqueeze(0) - torch.arange(Lq).unsqueeze(1) # Lq x Lk
+        R_cropped = torch.clamp(R, -self.max_len, self.max_len)
+        R_cropped = R_cropped + self.max_len-1 
+        R_cropped = R_cropped.to(device)
+        return self.pos_embedding[R_cropped] # Lq x Lk x Dh
+
+
+    
 
 # class MultiHeadAttention(nn.Module):
 #     def __init__(self, dim_model, h, dropout=0.1): # dim_key, dim_val = dim_model/h (?)
@@ -75,7 +112,7 @@ class ScaledDPAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, dim_model, h, dropout=0.1): # dim_key, dim_val = dim_model/h (?)
+    def __init__(self, dim_model, h, dropout=0.1, pos_encoding='static'): # dim_key, dim_val = dim_model/h (?)
         super().__init__()
         self.h = h
         self.dim_model = dim_model
@@ -85,7 +122,10 @@ class MultiHeadAttention(nn.Module):
         self.v_layer = nn.Linear(in_features=dim_model, out_features=self.dim_model, bias=True)
         self.k_layer = nn.Linear(in_features=dim_model, out_features=self.dim_model, bias=True)
         self.q_layer = nn.Linear(in_features=dim_model, out_features=self.dim_model, bias=True)
-        self.attention_layer = ScaledDPAttention(self.dim_head)
+        if pos_encoding == 'relative':
+            self.attention_layer = RPScaledDPAttention(self.dim_head)
+        else:
+            self.attention_layer = ScaledDPAttention(self.dim_head)
 
         self.linear = nn.Linear(in_features = dim_model, out_features=dim_model, bias=True)
         self.dropout = nn.Dropout(p=dropout)
@@ -121,6 +161,26 @@ class PositionalEncoding(nn.Module):
         X = X + self.encoding[:,:X.size(1)]
         return self.dropout(X)
 
+class PositionalEncodingLearned(nn.Module):
+    def __init__(self, dim_model, dropout=0.1, max_len=150):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        self.pos_embedding = nn.Embedding(max_len, dim_model)
+    
+    def forward(self, X):
+        B, L, D = X.size()
+        position = torch.arange(0, L).unsqueeze(0).repeat(B, 1).to(device)
+        X = X + self.pos_embedding(position)
+        return self.dropout(X)
+
+class PositionalEncodingPlaceHolder(nn.Module):
+    def __init__(self, dim_model, dropout=0.1, max_len=150):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+    
+    def forward(self, X):
+        return self.dropout(X)
+
 class TokenEmbedding(nn.Module):
     def __init__(self, dim_vocab, dim_emb):
         super().__init__()
@@ -132,9 +192,9 @@ class TokenEmbedding(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1):
+    def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1, pos_encoding='static'):
         super().__init__()        
-        self.attention = MultiHeadAttention(dim_model, h, dropout)
+        self.attention = MultiHeadAttention(dim_model, h, dropout, pos_encoding)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
             nn.ReLU(),
@@ -154,9 +214,9 @@ class EncoderLayer(nn.Module):
     
 
 class Encoder(nn.Module):
-    def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1):
+    def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1, pos_encoding='static'):
         super().__init__()
-        encoder_layer = EncoderLayer(dim_model, dim_hidden, h, dropout)
+        encoder_layer = EncoderLayer(dim_model, dim_hidden, h, dropout, pos_encoding)
         self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(N)])
         self.norm = nn.LayerNorm(dim_model)
 
@@ -167,11 +227,11 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1):
+    def __init__(self, dim_model, dim_hidden, h=8, dropout=0.1, pos_encoding='static'):
         super().__init__()
-        self.masked_attention = MultiHeadAttention(dim_model, h, dropout)
+        self.masked_attention = MultiHeadAttention(dim_model, h, dropout, pos_encoding)
         # self.masked_attention = nn.MultiheadAttention(dim_model, h, dropout, batch_first=True)
-        self.attention = MultiHeadAttention(dim_model, h, dropout)
+        self.attention = MultiHeadAttention(dim_model, h, dropout, pos_encoding)
         # self.attention = nn.MultiHeadAttention(dim_model, h, dropout, batch_first=True)
         self.FFN = nn.Sequential(
             nn.Linear(in_features=dim_model, out_features=dim_hidden),
@@ -196,9 +256,9 @@ class DecoderLayer(nn.Module):
         return self.norm3(F + A)
 
 class Decoder(nn.Module):
-    def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1):
+    def __init__(self, N, dim_model, dim_hidden, h=8, dropout=0.1, pos_encoding='static'):
         super().__init__()
-        decoder_layer = DecoderLayer(dim_model, dim_hidden, h, dropout)
+        decoder_layer = DecoderLayer(dim_model, dim_hidden, h, dropout, pos_encoding)
         self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for _ in range(N)])
         self.norm = nn.LayerNorm(dim_model)
     
@@ -219,19 +279,30 @@ class Generator(nn.Module):
         return self.linear(X)
 
 class TransformerModel(nn.Module):
-    def __init__(self, dim_model, dim_hidden, src_dim_vocab, trg_dim_vocab, N=6, h=8, dropout=0.1, weight_sharing=False):
+    def __init__(self, dim_model, dim_hidden, src_dim_vocab, trg_dim_vocab, N=6, h=8, dropout=0.1, weight_sharing=False, pos_encoding='static'):
         super().__init__()
 
-        self.encoder = Encoder(N, dim_model, dim_hidden, h, dropout)
-        self.decoder = Decoder(N, dim_model, dim_hidden, h, dropout)
+        self.pos_encoding = pos_encoding
+        assert self.pos_encoding in ['static', 'learned', 'relative']
+        self.encoder = Encoder(N, dim_model, dim_hidden, h, dropout, self.pos_encoding)
+        self.decoder = Decoder(N, dim_model, dim_hidden, h, dropout, self.pos_encoding)
         self.src_embedding = TokenEmbedding(src_dim_vocab, dim_model)
         self.trg_embedding = TokenEmbedding(trg_dim_vocab, dim_model)
         self.generator = Generator(dim_model, trg_dim_vocab)
-        self.enc_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
-        self.dec_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
+
+        if self.pos_encoding == 'learned':
+            self.enc_positional_encoding = PositionalEncodingLearned(dim_model, dropout=dropout)
+            self.dec_positional_encoding = PositionalEncodingLearned(dim_model, dropout=dropout)
+        elif self.pos_encoding == 'relative':
+            self.enc_positional_encoding = PositionalEncodingPlaceHolder(dim_model, dropout=dropout)
+            self.dec_positional_encoding = PositionalEncodingPlaceHolder(dim_model, dropout=dropout)
+        else:
+            self.enc_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
+            self.dec_positional_encoding = PositionalEncoding(dim_model, dropout=dropout)
 
         if weight_sharing:
             self.generator.linear.weight = self.trg_embedding.embedding.weight
+
     
     def encode(self, X, padding_mask):
         src_emb = self.enc_positional_encoding(self.src_embedding(X))

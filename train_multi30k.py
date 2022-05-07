@@ -21,7 +21,6 @@ import Transformer
 from helper import *
 from Multi30kDataLoader import Multi30kDataLoader
 
-# from torch.utils.tensorboard import SummaryWriter
 import nltk
 
 torch.cuda.empty_cache()
@@ -32,7 +31,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.manual_seed(1)
 random.seed(1)
 np.random.seed(1)
-# tb = SummaryWriter('./tb_log/train_multi30k_debug')
 
 
 class NoamOpt:
@@ -70,18 +68,18 @@ def epoch_time(start_time, end_time):
     elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
     return elapsed_mins, elapsed_secs
 
-def beam_translate(sentence, src_field, trg_field, model, k, max_len=2000):
+def beam_translate(tokens, src_field, trg_field, model, k, max_len=2000, logging=False):
     model.eval() # change into the evaluation mode
 
-    if isinstance(sentence, str):
-        nlp = spacy.load("en")
-        tokens = [token.text.lower() for token in nlp(sentence)]
-    else:
-        tokens = [token.lower() for token in sentence]
-
     # append <sos> token at the beginning and <eos> token at the end
-    tokens = [src_field.init_token] + tokens + [src_field.eos_token]
-    src_indexes = [src_field.vocab.stoi[token] for token in tokens]
+    tokens = [special_symbols[2]] + tokens + [special_symbols[3]]
+    if logging:
+        print(f"full source token: {tokens}")
+
+    src_indexes = [src_field[token] for token in tokens]
+    if logging:
+        print(f"source sentence index: {src_indexes}")
+
 
     src_tensor = torch.LongTensor(src_indexes).unsqueeze(0).to(device)
     src_mask = Transformer.get_padding_mask(src_tensor, PAD_IDX).to(device)
@@ -90,7 +88,7 @@ def beam_translate(sentence, src_field, trg_field, model, k, max_len=2000):
     memory  = memory.expand(k,memory.shape[1],memory.shape[2])
     src_mask = src_mask.expand(k,src_mask.shape[1],src_mask.shape[2])
 
-    k_prev_words = torch.full((k, 1), src_field.vocab.stoi[src_field.init_token], dtype=torch.long).to(device) # (k, 1)
+    k_prev_words = torch.full((k, 1), BOS_IDX, dtype=torch.long).to(device) # (k, 1)
 
     seqs = k_prev_words.to(device) #(k, 1)
     # prepare for beam search
@@ -121,7 +119,7 @@ def beam_translate(sentence, src_field, trg_field, model, k, max_len=2000):
         seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)
 
         # check whether their is EOS token
-        incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if next_word != trg_field.vocab.stoi[trg_field.eos_token]]
+        incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if next_word != EOS_IDX]
         # output the beam id for those complete sentence
         complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
 
@@ -145,7 +143,7 @@ def beam_translate(sentence, src_field, trg_field, model, k, max_len=2000):
 
     i = complete_seqs_scores.index(max(complete_seqs_scores))
     seq = complete_seqs[i]
-    trg_tokens = [trg_field.vocab.itos[i] for i in seq]
+    trg_tokens = [trg_field.get_itos()[i] for i in seq]
     return trg_tokens[1:]
 
 def translate_sentence(tokens, src_field, trg_field, model, max_len=2000, logging=True):
@@ -205,47 +203,36 @@ def translate_sentence(tokens, src_field, trg_field, model, max_len=2000, loggin
     return trg_tokens[1:]
 
 
-def show_bleu(iterator, src_field, trg_field, model, device, max_len=50):
+def show_bleu(iterator, src_field, trg_field, model, device, max_len=50, beam=False):
     index = 0
     trgs = []
     pred_trgs = []
-    # t = SummaryWriter()
     src_tokenizer, trg_tokenizer = iterator.get_tokenizer()
 
     for datum in iterator.dataset[:]:
         src, trg = datum
         trg_tok = trg_tokenizer(trg.lower())
         src_tok = src_tokenizer(src.lower())
-        # src = vars(datum)['src']
-        # trg = vars(datum)['trg']
 
-        pred_trg = translate_sentence(src_tok, src_field, trg_field, model, max_len, logging=False)
-        # k = 5 # beam width
-        # pred_trg = beam_translate(src, src_field, trg_field, model, k)
+
+        if beam:
+            k = 1 # beam width
+            pred_trg = beam_translate(src_tok, src_field, trg_field, model, k, max_len = len(src_tok)+50, logging=False)
+        else:
+            pred_trg = translate_sentence(src_tok, src_field, trg_field, model, max_len, logging=False)
 
         # Remove the last <eos> token
         pred_trg = pred_trg[:-1]
 
         pred_trgs.append(pred_trg)
         trgs.append([trg_tok])
-        # try:
-        #     b = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
-        #     tb.add_scalar('bleu', b, index)
-        # except:
-        #     print(index)
-        #     print(pred_trg)
-        #     print(trg_tok)
+
         index += 1
         if (index + 1) % 100 == 0:
             print(f"[{index + 1}/{len(iterator.dataset)}]")
             print(f"pred: {pred_trg}")
             print(f"trg: {trg_tok}")
-        # print("src: ", src_tok)
-        # print("-"*100)
-        # print("trg: ", trgs)
-        # print("-"*100)
-        # print("pred: ", pred_trgs )
-        # print("="*100)
+
 
     bleu = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
 
@@ -261,7 +248,6 @@ def show_bleu(iterator, src_field, trg_field, model, device, max_len=50):
     logging.info(f'BLEU Score = {bleu*100:.2f}'
     + f'| BLEU-1 = {individual_bleu1_score*100:.2f} | BLEU-2 = {individual_bleu2_score*100:.2f}'
     + f'| BLEU-3 = {individual_bleu3_score*100:.2f} | BLEU-4 = {individual_bleu4_score*100:.2f}')
-    # t.close()
     return bleu, individual_bleu1_score, individual_bleu2_score, individual_bleu3_score, individual_bleu4_score
 
 
@@ -271,7 +257,6 @@ def cal_loss(pred, gold, trg_pad_idx, smoothing=False):
     if smoothing:
         eps = 0.1
         n_class = pred.size(-1)
-        # gold = gold.type(torch.LongTensor).to(device)
         one_hot = torch.zeros_like(pred).scatter(1, gold.view(-1, 1), 1)
         one_hot = one_hot * (1 - eps) + (1 - one_hot) * eps / (n_class - 1)
         log_prb = F.log_softmax(pred, dim=1)
@@ -294,8 +279,6 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
     for i, batch in enumerate(iterator):
         n_batch += 1
         src, trg = batch
-        # print("Input: ", src, src.shape)
-        # print("Input: ", trg, trg.shape)
         src = src.to(device)
         trg = trg.to(device)
 
@@ -318,16 +301,7 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
         output = output.contiguous().view(-1, output_dim)
         # Exclude index 0 (<sos>) of output word
         trg_y = trg_y.contiguous().view(-1)
-        # calculate the loss
         loss = cal_loss(output, trg_y, PAD_IDX, True)
-        # tb.add_histogram('source', src,  epoch_num*iterator.data_size + i)
-        # tb.add_histogram('trg', trg,  epoch_num*iterator.data_size + i)
-        # tb.add_histogram('output', output,  epoch_num*iterator.data_size + i)
-        # debugg
-        # print("debugging")
-
-        # loss = criterion(output, trg_y)
-        # debug end
 
         loss.backward()
 
@@ -342,17 +316,6 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
             logging.info(
                 f"epoch {epoch_num} | bacth: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
 
-            # tensorboard
-            # tb = SummaryWriter('./tb_log/train_multi30k_debug')
-            # tb.add_graph(model, [src, trg_in, src_padding_mask,
-            #             trg_padding_mask, peek_mask])
-            # for name, weight in model.named_parameters():
-            #     if weight is not None:
-            #         tb.add_histogram(name,weight, epoch_num*iterator.data_size + i)
-            #     if weight.grad is not None:
-            #         tb.add_histogram(f'{name}/grad',weight.grad, epoch_num*iterator.data_size + i)
-            # tb.close()
-            # end tensorboard
     return epoch_loss / len(iterator)
 
 
@@ -380,19 +343,6 @@ def evaluate(model, iterator, criterion):
             output = model(src, trg_in, src_padding_mask,
                            trg_padding_mask, peek_mask)
 
-            # # tensorboard
-            # if i == 1:
-            #     tb = SummaryWriter('./tb_log/train_multi30k_debug')
-            #     tb.add_graph(model, [src, trg_in, src_padding_mask,
-            #                trg_padding_mask, peek_mask])
-            #     for name, weight in model.named_parameters():
-            #         if weight is not None:
-            #             tb.add_histogram(name,weight, 0)
-            #             # tb.add_histogram(f'{name}.grad',weight.grad, 0)
-            #     tb.close()
-            # # end tensorboard
-            # output: [batch size, trg_len - 1, output_dim]
-            # trg: [batch size, trg_len]
             output_dim = output.shape[-1]
 
             output = output.contiguous().view(-1, output_dim)
@@ -601,5 +551,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # tb.close()
 

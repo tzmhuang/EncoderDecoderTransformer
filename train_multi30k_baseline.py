@@ -16,16 +16,12 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torchtext.data.metrics import bleu_score
-# from torchtext.data import Field, BucketIterator
 from torchtext.datasets import Multi30k
-
-# from nltk.translate.bleu_score import corpus_bleu
 
 import Transformer_baseline
 from helper import *
 from Multi30kDataLoader import Multi30kDataLoader
 
-# from torch.utils.tensorboard import SummaryWriter
 import nltk
 
 torch.cuda.empty_cache()
@@ -36,7 +32,6 @@ random.seed(1)
 np.random.seed(1)
 
 
-# tb = SummaryWriter('./tb_log/train_multi30k_baseline')
 
 
 class NoamOpt:
@@ -91,27 +86,9 @@ def epoch_time(start_time, end_time):
     return elapsed_mins, elapsed_secs
 
 
-# def load_model(resume_iters):
-#     print('Loading the trained models from step {}...'.format(resume_iters))
-#     model_path = os.path.join('model/transformer_{}.pt'.format(resume_iters+1))
-
-#     model = Transformer.TransformerModel(
-#         dim_model, dim_hidden, dim_vocab, N=num_layers, h=num_heads)
-#     model.load_state_dict(torch.load(model_path))
-
-#     return model
-
 
 def translate_sentence(tokens, src_field, trg_field, model, max_len=2000, logging=True):
     model.eval()  # change into the evaluation mode
-
-    # if isinstance(sentence, str):
-    #     nlp = spacy.load("de")
-    #     tokens = [token.text.lower() for token in nlp(sentence)]
-    # else:
-    #     tokens = [token.lower() for token in sentence]
-    # src_tok = iterator.dataset.src_tokenizer(sentence)
-
 
     # append <sos> token at the beginning and <eos> token at the end
     tokens = [special_symbols[2]] + tokens + [special_symbols[3]]
@@ -167,8 +144,6 @@ def show_bleu(iterator, data, src_field, trg_field, model, device, max_len=50):
     src_tokenizer, trg_tokenizer = iterator.get_tokenizer()
 
     for datum in data:
-        # src = vars(datum)['src']
-        # trg = vars(datum)['trg']
         src, trg = datum
         trg_tok = trg_tokenizer(trg.lower())
         src_tok = src_tokenizer(src.lower())
@@ -179,13 +154,6 @@ def show_bleu(iterator, data, src_field, trg_field, model, device, max_len=50):
 
         pred_trgs.append(pred_trg)
         trgs.append([trg_tok])
-        try:
-            b = nltk.translate.bleu_score.corpus_bleu(trgs, pred_trgs, weights=[0.25, 0.25, 0.25, 0.25])
-            tb.add_scalar('bleu', b, index)
-        except:
-            print(index)
-            print(pred_trg)
-            print(trg_tok)
         index += 1
         if (index + 1) % 100 == 0:
             print(f"[{index + 1}/{len(iterator.dataset)}]")
@@ -216,7 +184,6 @@ def cal_loss(pred, gold, trg_pad_idx, smoothing=True):
     if smoothing:
         eps = 0.1
         n_class = pred.size(-1)
-        # gold = gold.type(torch.LongTensor).to(device)
         one_hot = torch.zeros_like(pred).scatter(1, gold.view(-1, 1), 1)
         one_hot = one_hot * (1 - eps) + (1 - one_hot) * eps / (n_class - 1)
         log_prb = F.log_softmax(pred, dim=1)
@@ -236,8 +203,6 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
 
     # iterate through whole data set
     for i, batch in enumerate(iterator):
-        # src = batch.src
-        # trg = batch.trg
         src, trg = batch
 
         src = src.transpose(0,1).to(device)
@@ -261,9 +226,6 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
         # Exclude index 0 (<sos>) of output word
         trg_y = trg_y.contiguous().view(-1)
 
-        # tb.add_histogram('source', src,  epoch_num*iterator.data_size + i)
-        # tb.add_histogram('trg', trg,  epoch_num*iterator.data_size + i)
-        # tb.add_histogram('output', output,  epoch_num*iterator.data_size + i)
         # calculate the loss
         loss = cal_loss(output, trg_y, PAD_IDX, True)
         loss.backward()
@@ -277,17 +239,6 @@ def train(model, iterator, optimizer, criterion, epoch_num, clip=1, log_iter=100
             train_ppl = math.exp(min(loss, 100))
             logging.info(
                 f"epoch {epoch_num} | bacth: {i+1}/{len(iterator)} | train_loss: {loss:.3f} | train_ppl: {train_ppl}")
-            # tensorboard
-            # tb = SummaryWriter('./tb_log/train_multi30k_baseline')
-            # tb.add_graph(model, [src, trg_in, src_mask, tgt_mask, src_padding_mask,
-            #            tgt_padding_mask, src_padding_mask])
-            # for name, weight in model.named_parameters():
-            #     if weight is not None:
-            #         tb.add_histogram(name,weight, epoch_num*iterator.data_size + i)
-            #     if weight.grad is not None:
-            #         tb.add_histogram(f'{name}/grad',weight.grad, epoch_num*iterator.data_size + i)
-            # tb.close()
-            # end tensorboard
     return epoch_loss / len(iterator)
 
 
@@ -299,8 +250,6 @@ def evaluate(model, iterator, criterion):
         # Checking the entire evaluation data
         for i, batch in enumerate(iterator):
             src, trg = batch
-            # src = batch.src
-            # trg = batch.trg
 
             src = src.transpose(0,1).to(device)
             trg = trg.transpose(0,1).to(device)
@@ -314,19 +263,6 @@ def evaluate(model, iterator, criterion):
 
             output = model(src, trg_in, src_mask, tgt_mask, src_padding_mask,
                            tgt_padding_mask, src_padding_mask)
-
-
-            # # tensorboard
-            # if i == 1:
-            #     tb = SummaryWriter('./tb_log/train_multi30k_baseline')
-            #     tb.add_graph(model, [src, trg_in, src_mask, tgt_mask, src_padding_mask,
-            #                tgt_padding_mask, src_padding_mask])
-            #     for name, weight in model.named_parameters():
-            #         if weight is not None:
-            #             tb.add_histogram(name,weight, 0)
-            #             # tb.add_histogram(f'{name}.grad',weight.grad, 0)
-            #     tb.close()
-            # # end tensorboard
 
             # output: [batch size, trg_len - 1, output_dim]
             # trg: [batch size, trg_len]
@@ -446,40 +382,6 @@ def main():
         ]
     )
 
-    # load tokenization
-    spacy_en = spacy.load('en_core_web_sm')
-    spacy_de = spacy.load('de_core_news_sm')
-
-    # define tokenizer function
-    def tokenize_de(text):
-        return [token.text for token in spacy_de.tokenizer(text)]
-
-    def tokenize_en(text):
-        return [token.text for token in spacy_en.tokenizer(text)]
-
-    # load field tokenizer
-    # SRC = Field(tokenize=tokenize_en, init_token="<sos>", eos_token="<eos>", lower=True, batch_first=True)
-    # TRG = Field(tokenize=tokenize_de, init_token="<sos>", eos_token="<eos>", lower=True, batch_first=True)
-
-    # # load datasets
-    # train_dataset, valid_dataset, test_dataset = Multi30k.splits(exts=(".en", ".de"), fields=(SRC, TRG))
-    # logging.info(f"training dataset: {len(train_dataset.examples)} \n"
-    #              + f"validation dataset: {len(valid_dataset.examples)} \n"
-    #              + f"Test dataset: {len(test_dataset.examples)} \n")
-
-    # # build the vocabulary
-    # SRC.build_vocab(train_dataset, min_freq=2)
-    # TRG.build_vocab(train_dataset, min_freq=2)
-    # logging.info(f"src_vocab: {len(SRC.vocab)} \n" +
-    #              f"trg_vocab: {len(TRG.vocab)} \n")
-    # logging.info(f"Running on: {device}")
-
-    # # data loader
-    # train_iterator, valid_iterator, test_iterator = BucketIterator.splits(
-    #     (train_dataset, valid_dataset, test_dataset),
-    #     batch_size=args.batch_size,
-    #     device=device)
-
 
     train_iterator = Multi30kDataLoader(
         'en', 'de', 'train', batch_size=args.batch_size, num_workers=args.num_workers, use_bpe=args.use_bpe, shuffle=True)
@@ -569,4 +471,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # tb.close()
