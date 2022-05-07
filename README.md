@@ -4,6 +4,7 @@ This is a re-implementation of transformer architecture for machine translation 
 
 ## Data Processing
 
+The code for data processing are located in `./data` file
 
 ### Download and preprocess WMT translation data
 
@@ -109,10 +110,10 @@ The code for our quality estimation models can be found in the files listed in t
 
 | Model           | Script                   |
 | --------------- | ------------------------ |
-| Transformer+MLP | `Transformer_QE.ipynb`   |
-| BERT+MLP        | `Bert_QE.ipynb`          |
-| XML+MLP         | `transformer_xml.ipynb`  |
-| NUQE+MLP        | `transformer_nuqe.ipynb` |
+| Transformer+MLP | `QE/Transformer_QE.ipynb`   |
+| BERT+MLP        | `QE/Bert_QE.ipynb`          |
+| XML+MLP         | `QE/transformer_xml.ipynb`  |
+| NUQE+MLP        | `QE/transformer_nuqe.ipynb` |
 
 ## References
 
