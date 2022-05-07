@@ -2,7 +2,7 @@
 This is a re-implementation of transformer architecture for machine translation based on the original paper, Attention is all you need [1].
 
 
-## Run
+## Data Processing
 
 
 ### Download and preprocess WMT translation data
@@ -74,37 +74,56 @@ The generate data file has the following structure:
 
 
 
-### Training transformer for translation on the WMT dataset
+## Translation on WMT17 Tataset
 
-#### Our method
-
-```
-python train.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 16 --log_dir ./log
-```
-
-#### Baseline
+### Our Implementation
 
 ```
-python train_baseline.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 16 --log_dir ./log
+python train.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 128 --log_dir ./log
 ```
 
-### Training transformer for translation on the Multi30k dataset
-
-#### Baseline
+### Baseline
 
 ```
-python train_multi30k_baseline.py --log_dir ./log
+python train_baseline.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_size 128 --log_dir ./log
 ```
 
-## Dataset
-We plan to use and updated version of the datasets used in the original paper. The datasets are:
 
-- The standard WMT 2017 English-German dataset (https://www.statmt.org/wmt17/translation-task.html) consisting of about 4.5 million sentence pairs. 
+## Translation on Multi30k dataset
 
+### Our Implementaiton
 
-## Metric
-We use the BLEU (BiLingual Evaluation Understudy) as a metric same as the original paper. It is a n-gram based evaluation metric with score scaled between zero and one , which measures the similarity of the machine-translated text to a set of high quality reference translations. A value of 0 means that the machine-translated output has no overlap with the reference translation (low quality) while a value of 1 means there is perfect overlap with the reference translations (high quality).
+```
+python train_multi30k.py --batch_size 128 --log_dir ./log
+```
+
+### Baseline
+
+```
+python train_multi30k_baseline.py --batch_size 128 --log_dir ./log
+```
+
+## Quality Estimation
+
+The code for our quality estimation models can be found in the files listed in the table below
+
+| Model           | Script                   |
+| --------------- | ------------------------ |
+| Transformer+MLP | `Transformer_QE.ipynb`   |
+| BERT+MLP        | `Bert_QE.ipynb`          |
+| XML+MLP         | `transformer_xml.ipynb`  |
+| NUQE+MLP        | `transformer_nuqe.ipynb` |
 
 ## References
 
 [1] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin: “Attention Is All You Need”, 2017; arXiv:1706.03762.
+
+## Code references
+
+[1] https://jaketae.github.io/study/relative-positional-encoding/
+
+[2] https://github.com/jadore801120/attention-is-all-you-need-pytorch/tree/master
+
+[3] https://github.com/enhuiz/transformer-pytorch
+
+[4] https://nlp.seas.harvard.edu/2018/04/03/attention.html
