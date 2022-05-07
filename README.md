@@ -77,6 +77,8 @@ The generate data file has the following structure:
 
 ## Translation on WMT17 Tataset
 
+The code for translation is located under `./MT`.
+
 ### Our Implementation
 
 ```
@@ -91,6 +93,8 @@ python train_baseline.py --data_path ./wmttest_en_de_processed_bpe.pkl --batch_s
 
 
 ## Translation on Multi30k dataset
+
+The code for translation is located under `./MT`.
 
 ### Our Implementaiton
 
