@@ -1,4 +1,4 @@
-# CS 523 Project
+# Encoder-Decoder Transformer
 This is a re-implementation of transformer architecture for machine translation based on the original paper, Attention is all you need [1].
 
 
