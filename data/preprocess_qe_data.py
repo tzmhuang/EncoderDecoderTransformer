@@ -53,7 +53,26 @@ def extract(source_dir, compressed_file, filename):
 
     sys.stderr.write(f"Extracting {compressed_file}.\n")
     with tarfile.open(source_dir+'/'+compressed_file, "r:gz") as corpus_tar:
-        corpus_tar.extractall(source_dir)
+        def is_within_directory(directory, target):
+            
+            abs_directory = os.path.abspath(directory)
+            abs_target = os.path.abspath(target)
+        
+            prefix = os.path.commonprefix([abs_directory, abs_target])
+            
+            return prefix == abs_directory
+        
+        def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+        
+            for member in tar.getmembers():
+                member_path = os.path.join(path, member.name)
+                if not is_within_directory(path, member_path):
+                    raise Exception("Attempted Path Traversal in Tar File")
+        
+            tar.extractall(path, members, numeric_owner=numeric_owner) 
+            
+        
+        safe_extract(corpus_tar, source_dir)
 
     _path = file_exist(source_dir, filename)
     if _path:
